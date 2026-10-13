@@ -1,0 +1,16 @@
+# Web Framework & Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+
+# Computer Vision & Numerical Processing
+# opencv-python-headless is recommended for headless server environments and Cloud Run container deployments
+opencv-python-headless>=4.9.0.80
+numpy>=1.26.0
+
+# Configuration & Environment
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# Testing & Client
+pytest>=8.0.0
+httpx>=0.27.0

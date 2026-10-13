@@ -218,3 +218,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==============================================================================
+# InspectAgent Project Specific Rules
+# ==============================================================================
+
+# Environment files & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*service_account*.json
+*service-account*.json
+*credentials*.json
+client_secret*.json
+
+# MVTec AD Dataset (Raw images and annotations)
+# Keep directory structure via .gitkeep while ignoring actual dataset files
+dataset/**
+!dataset/
+!dataset/**/
+!dataset/**/.gitkeep
+
+# Inspection outputs and generated images
+data/outputs/**
+!data/outputs/
+!data/outputs/.gitkeep
+
+# Execution & inspection logs
+data/logs/**
+!data/logs/
+!data/logs/.gitkeep
+*.log

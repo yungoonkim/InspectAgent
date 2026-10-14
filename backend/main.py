@@ -21,7 +21,12 @@ from backend.vision import (
     save_modified_image,
     evaluate_image_quality,
 )
-from backend.inspection import execute_inspection, get_image_registry
+from backend.inspection import (
+    execute_inspection,
+    execute_inspection_workflow,
+    get_image_registry,
+)
+from backend.storage import StorageError, get_inspection_storage
 
 settings = get_settings()
 
@@ -135,8 +140,18 @@ class InspectionResponse(BaseModel):
     image_id: str = Field(description="Server-managed image identifier", examples=["IMG-BOTTLE-0001"])
     status: str = Field(default="COMPLETED", description="Inspection execution status", examples=["COMPLETED"])
     result: str = Field(default="UNKNOWN", description="Inspection verdict (OK/NG/UNKNOWN)", examples=["UNKNOWN"])
-    timestamp: str = Field(description="ISO 8601 formatted timestamp with timezone (+09:00)")
+    timestamp: str = Field(description="ISO 8601 formatted timestamp with timezone (UTC or +09:00)")
+    image_quality_status: str = Field(
+        default="NORMAL",
+        description="Environmental image acquisition quality status: NORMAL | WARNING_LOW_BRIGHTNESS | WARNING_HIGH_BRIGHTNESS",
+        examples=["NORMAL"],
+    )
+    metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Vision inspection metrics (brightness, standard deviation, dimensions)",
+    )
     image_metadata: ImageMetadataResponse
+
 
 
 # ==============================================================================
@@ -345,37 +360,64 @@ def compare_fault_injection(current_settings: Settings = Depends(get_settings)) 
     "/inspections",
     response_model=InspectionResponse,
     status_code=201,
-    summary="Create and execute an inspection for a product and image ID",
+    summary="Create and execute an inspection with brightness analysis and event logging",
     description=(
         "Receives product_id and a server-managed neutral image_id, loads the image securely via OpenCV, "
-        "and returns a unique collision-free inspection_id. Product defect result is marked as UNKNOWN "
-        "since a defect classifier is not yet integrated. Ground truth labels are never exposed."
+        "calculates brightness and quality metrics, logs lifecycle events to inspection_logs.jsonl, "
+        "persists the inspection outcome to inspections.jsonl, and returns the inspection result."
     ),
     responses={
         400: {"description": "Invalid or disallowed image_id"},
         404: {"description": "Image file not found on server"},
         422: {"description": "Image file corrupted or unreadable by OpenCV"},
+        500: {"description": "Storage persistence failure"},
     },
 )
 def create_inspection_endpoint(
     payload: InspectionCreateRequest,
     current_settings: Settings = Depends(get_settings),
 ) -> InspectionResponse:
-    """Execute Day 1 inspection and return assigned inspection ID."""
+    """Execute Day 2 inspection workflow with automated JSONL logging and persistence."""
     registry = get_image_registry(current_settings)
+    storage = get_inspection_storage()
+
     try:
-        inspection_data = execute_inspection(
+        record, logs = execute_inspection_workflow(
             product_id=payload.product_id,
             image_id=payload.image_id,
             registry=registry,
+            storage=storage,
+            low_threshold=current_settings.BRIGHTNESS_LOW_THRESHOLD,
+            high_threshold=current_settings.BRIGHTNESS_HIGH_THRESHOLD,
         )
-        return InspectionResponse(**inspection_data)
+
+        image_metadata = ImageMetadataResponse(
+            filename=str(record.metrics.get("filename", f"{record.image_id}.png")),
+            width=int(record.metrics.get("width", 0)),
+            height=int(record.metrics.get("height", 0)),
+            channels=int(record.metrics.get("channels", 3)),
+        )
+
+        return InspectionResponse(
+            inspection_id=record.inspection_id,
+            product_id=record.product_id,
+            image_id=record.image_id,
+            status=record.status,
+            result=record.result,
+            timestamp=record.timestamp,
+            image_quality_status=record.image_quality_status,
+            metrics=record.metrics,
+            image_metadata=image_metadata,
+        )
     except KeyError as err:
         raise HTTPException(status_code=400, detail=str(err))
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err))
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err))
+    except StorageError as err:
+        raise HTTPException(status_code=500, detail=f"Storage error: Failed to persist inspection record: {err}")
+
 
 
 @app.get(

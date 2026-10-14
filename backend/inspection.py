@@ -7,10 +7,21 @@ and execution decoupled from ground truth or defect classifications.
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import cv2
 
 from backend.config import Settings, get_settings
+from backend.vision import analyze_image
+from backend.storage import (
+    EventCode,
+    InspectionLogRecord,
+    InspectionRecord,
+    InspectionStage,
+    InspectionStorageBase,
+    LogLevel,
+    get_inspection_storage,
+    get_utc_now_iso,
+)
 
 
 class InspectionIdGenerator:
@@ -35,6 +46,28 @@ class InspectionIdGenerator:
         with self._lock:
             self._counter = start_idx
 
+    def sync_with_storage(self, file_path: Path) -> None:
+        """Sync counter with highest existing INSP-XXXXXX to prevent duplicate IDs across restarts."""
+        if not file_path.exists():
+            return
+        import re
+        pattern = re.compile(r"INSP-(\d+)")
+        max_idx = 0
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    match = pattern.search(line)
+                    if match:
+                        val = int(match.group(1))
+                        if val > max_idx:
+                            max_idx = val
+        except Exception:
+            pass
+        with self._lock:
+            if max_idx >= self._counter:
+                self._counter = max_idx + 1
+
+
 
 class ImageRegistry:
     """Server-side registry that maps neutral image IDs to internal dataset file paths.
@@ -44,18 +77,33 @@ class ImageRegistry:
     so that Agent tools and external clients only interact with neutral IDs (e.g. IMG-BOTTLE-0001).
     """
 
-    def __init__(self, dataset_root: Optional[Path] = None):
+    def __init__(
+        self,
+        dataset_root: Optional[Path] = None,
+        injected_root: Optional[Path] = None,
+        allow_test_stubs: bool = False,
+    ):
         self._mapping: Dict[str, Path] = {}
         self._lock = threading.Lock()
         self._dataset_root = dataset_root
+        self._injected_root = injected_root
+        self._allow_test_stubs = allow_test_stubs
         if dataset_root is not None:
-            self.refresh(dataset_root)
+            self.refresh(dataset_root, injected_root=injected_root, allow_test_stubs=allow_test_stubs)
 
-    def refresh(self, dataset_root: Path) -> None:
-        """Scan dataset root and build deterministic neutral ID mappings."""
+    def refresh(
+        self,
+        dataset_root: Path,
+        injected_root: Optional[Path] = None,
+        allow_test_stubs: Optional[bool] = None,
+    ) -> None:
+        """Scan dataset root and optional injected images directory to build deterministic neutral ID mappings."""
         with self._lock:
             self._mapping.clear()
             self._dataset_root = dataset_root
+            self._injected_root = injected_root
+            if allow_test_stubs is not None:
+                self._allow_test_stubs = allow_test_stubs
 
             if not dataset_root.exists() or not dataset_root.is_dir():
                 return
@@ -71,6 +119,31 @@ class ImageRegistry:
             for idx, img_path in enumerate(discovered_paths, start=1):
                 image_id = f"IMG-BOTTLE-{idx:04d}"
                 self._mapping[image_id] = img_path.resolve()
+
+            # Scan test injected directory if configured and exists
+            if injected_root is not None and injected_root.exists() and injected_root.is_dir():
+                injected_paths = sorted([
+                    p for p in injected_root.glob("**/*.png")
+                    if p.is_file()
+                ])
+                for idx, inj_path in enumerate(injected_paths, start=1):
+                    # If filename starts with IMG-BOTTLE-INJ-, preserve exact neutral stem, else format
+                    stem = inj_path.stem.upper()
+                    if stem.startswith("IMG-BOTTLE-INJ-"):
+                        inj_id = stem
+                    else:
+                        inj_id = f"IMG-BOTTLE-INJ-{idx:04d}"
+                    self._mapping[inj_id] = inj_path.resolve()
+
+            # In approved non-production environments, register neutral test stub for T05 load failure
+            if self._allow_test_stubs and dataset_root is not None:
+                test_missing_path = (dataset_root.parent / "test_data" / "injected_images" / "nonexistent_sample.png").resolve()
+                self._mapping["IMG-BOTTLE-NONEXISTENT"] = test_missing_path
+
+    def register_image(self, image_id: str, path: Path) -> None:
+        """Register a specific neutral image_id mapped to a server-side path."""
+        with self._lock:
+            self._mapping[image_id] = path.resolve()
 
     def get_path(self, image_id: str) -> Optional[Path]:
         """Resolve a neutral image_id to its absolute server-side filesystem path."""
@@ -93,13 +166,28 @@ _id_generator = InspectionIdGenerator()
 _image_registry: Optional[ImageRegistry] = None
 
 
+def get_inspection_id_generator(settings: Optional[Settings] = None) -> InspectionIdGenerator:
+    """Retrieve or initialize the singleton inspection ID generator synced with storage."""
+    global _id_generator
+    curr_settings = settings or get_settings()
+    _id_generator.sync_with_storage(curr_settings.absolute_inspections_path)
+    return _id_generator
+
+
 def get_image_registry(settings: Optional[Settings] = None) -> ImageRegistry:
     """Retrieve or initialize the singleton image registry."""
     global _image_registry
     if _image_registry is None:
         curr_settings = settings or get_settings()
-        _image_registry = ImageRegistry(curr_settings.absolute_dataset_path)
+        injected_dir = curr_settings.absolute_injected_images_path
+        allow_stubs = (curr_settings.ENVIRONMENT != "production")
+        _image_registry = ImageRegistry(
+            dataset_root=curr_settings.absolute_dataset_path,
+            injected_root=injected_dir,
+            allow_test_stubs=allow_stubs,
+        )
     return _image_registry
+
 
 
 def execute_inspection(
@@ -163,3 +251,247 @@ def execute_inspection(
             "channels": channels,
         },
     }
+
+
+def execute_inspection_workflow(
+    product_id: str,
+    image_id: str,
+    registry: Optional[ImageRegistry] = None,
+    id_gen: Optional[InspectionIdGenerator] = None,
+    storage: Optional[InspectionStorageBase] = None,
+    low_threshold: Optional[float] = None,
+    high_threshold: Optional[float] = None,
+) -> Tuple[InspectionRecord, List[InspectionLogRecord]]:
+    """Execute Day 2 inspection workflow with end-to-end JSONL logging and record persistence.
+
+    Lifecycle Steps:
+    1. Generate a collision-free inspection ID.
+    2. Log INSPECTION_STARTED event.
+    3. Resolve neutral image_id to disk path and decode with OpenCV.
+       - On failure: log IMAGE_LOAD_FAILED and INSPECTION_FAILED, persist failed record, and re-raise.
+       - On success: log IMAGE_LOADED event with dimensions and metadata.
+    4. Execute OpenCV brightness and size analysis.
+       - Log ANALYSIS_COMPLETED event with brightness metrics.
+    5. Evaluate quality status (NORMAL / WARNING_LOW_BRIGHTNESS / WARNING_HIGH_BRIGHTNESS).
+       - Product defect result remains strictly UNKNOWN.
+    6. Log INSPECTION_COMPLETED event.
+    7. Persist InspectionRecord and all event logs to respective JSONL stores.
+
+    Guarantees:
+    - Events that did not occur are never logged.
+    - Records and logs are linked by identical inspection_id.
+    """
+    reg = registry or get_image_registry()
+    generator = id_gen or get_inspection_id_generator()
+    store = storage or get_inspection_storage()
+
+    # 1. Allocate unique inspection ID
+    inspection_id = generator.next_id()
+    collected_logs: List[InspectionLogRecord] = []
+
+    # 2. Stage: INIT -> INSPECTION_STARTED
+    start_log = InspectionLogRecord(
+        timestamp=get_utc_now_iso(),
+        inspection_id=inspection_id,
+        level=LogLevel.INFO,
+        stage=InspectionStage.INIT,
+        event_code=EventCode.INSPECTION_STARTED,
+        message=f"Inspection initiated for product {product_id} with image_id {image_id}",
+        source="inspection",
+    )
+    collected_logs.append(start_log)
+
+    # 3. Stage: LOAD -> Resolve and decode image
+    image_path = reg.get_path(image_id)
+    if image_path is None:
+        err_msg = f"Image ID '{image_id}' is not registered or allowed by server."
+        fail_load_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.LOAD,
+            event_code=EventCode.IMAGE_LOAD_FAILED,
+            message=err_msg,
+            source="vision",
+        )
+        collected_logs.append(fail_load_log)
+
+        fail_insp_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.COMPLETE,
+            event_code=EventCode.INSPECTION_FAILED,
+            message="Inspection aborted due to unregistered image_id",
+            source="inspection",
+        )
+        collected_logs.append(fail_insp_log)
+
+        failed_record = InspectionRecord(
+            inspection_id=inspection_id,
+            product_id=product_id,
+            timestamp=get_utc_now_iso(),
+            image_id=image_id,
+            result="UNKNOWN",
+            image_quality_status="ERROR",
+            metrics={"error": err_msg},
+            status="FAILED",
+        )
+        store.save_inspection(failed_record)
+        store.save_logs(collected_logs)
+        raise KeyError(err_msg)
+
+    if not image_path.exists() or not image_path.is_file():
+        err_msg = f"Underlying image file for '{image_id}' not found on server."
+        fail_load_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.LOAD,
+            event_code=EventCode.IMAGE_LOAD_FAILED,
+            message=err_msg,
+            source="vision",
+        )
+        collected_logs.append(fail_load_log)
+
+        fail_insp_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.COMPLETE,
+            event_code=EventCode.INSPECTION_FAILED,
+            message="Inspection aborted due to missing image file on server",
+            source="inspection",
+        )
+        collected_logs.append(fail_insp_log)
+
+        failed_record = InspectionRecord(
+            inspection_id=inspection_id,
+            product_id=product_id,
+            timestamp=get_utc_now_iso(),
+            image_id=image_id,
+            result="UNKNOWN",
+            image_quality_status="ERROR",
+            metrics={"error": err_msg},
+            status="FAILED",
+        )
+        store.save_inspection(failed_record)
+        store.save_logs(collected_logs)
+        raise FileNotFoundError(err_msg)
+
+    image = cv2.imread(str(image_path))
+    if image is None:
+        err_msg = f"Failed to decode image file with OpenCV for image_id '{image_id}'"
+        fail_decode_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.LOAD,
+            event_code=EventCode.IMAGE_LOAD_FAILED,
+            message=err_msg,
+            source="vision",
+        )
+        collected_logs.append(fail_decode_log)
+
+        fail_insp_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.ERROR,
+            stage=InspectionStage.COMPLETE,
+            event_code=EventCode.INSPECTION_FAILED,
+            message="Inspection aborted due to image decode failure",
+            source="inspection",
+        )
+        collected_logs.append(fail_insp_log)
+
+        failed_record = InspectionRecord(
+            inspection_id=inspection_id,
+            product_id=product_id,
+            timestamp=get_utc_now_iso(),
+            image_id=image_id,
+            result="UNKNOWN",
+            image_quality_status="ERROR",
+            metrics={"error": err_msg},
+            status="FAILED",
+        )
+        store.save_inspection(failed_record)
+        store.save_logs(collected_logs)
+        raise ValueError(err_msg)
+
+    # Image load success
+    height = int(image.shape[0])
+    width = int(image.shape[1])
+    channels = int(image.shape[2]) if len(image.shape) > 2 else 1
+    load_success_log = InspectionLogRecord(
+        timestamp=get_utc_now_iso(),
+        inspection_id=inspection_id,
+        level=LogLevel.INFO,
+        stage=InspectionStage.LOAD,
+        event_code=EventCode.IMAGE_LOADED,
+        message=f"Image loaded successfully ({width}x{height}, {channels} channels)",
+        metrics={"width": width, "height": height, "channels": channels, "filename": image_path.name},
+        source="vision",
+    )
+    collected_logs.append(load_success_log)
+
+    # 4. Stage: ANALYZE -> Execute vision quality analysis
+    analysis = analyze_image(
+        image=image,
+        low_threshold=low_threshold,
+        high_threshold=high_threshold,
+        filename=image_path.name,
+    )
+
+    quality_eval = analysis["quality_evaluation"]
+    quality_status = quality_eval["quality_status"]
+    is_warning = quality_eval["warning_triggered"]
+    brightness_metrics = analysis["brightness_metrics"]
+
+    # Analysis completed event
+    analysis_log = InspectionLogRecord(
+        timestamp=get_utc_now_iso(),
+        inspection_id=inspection_id,
+        level=LogLevel.WARN if is_warning else LogLevel.INFO,
+        stage=InspectionStage.ANALYZE,
+        event_code=EventCode.ANALYSIS_COMPLETED,
+        message=quality_eval["description"],
+        metrics=brightness_metrics,
+        source="vision",
+    )
+    collected_logs.append(analysis_log)
+
+    # 5. Stage: COMPLETE -> Record final completion
+    complete_log = InspectionLogRecord(
+        timestamp=get_utc_now_iso(),
+        inspection_id=inspection_id,
+        level=LogLevel.INFO,
+        stage=InspectionStage.COMPLETE,
+        event_code=EventCode.INSPECTION_COMPLETED,
+        message=f"Inspection completed successfully. Quality: {quality_status}, Verdict: UNKNOWN",
+        source="inspection",
+    )
+    collected_logs.append(complete_log)
+
+    # 6. Build and persist InspectionRecord
+    combined_metrics: Dict[str, Any] = {
+        **analysis["image_size"],
+        **brightness_metrics,
+        "filename": image_path.name,
+    }
+
+    record = InspectionRecord(
+        inspection_id=inspection_id,
+        product_id=product_id,
+        timestamp=get_utc_now_iso(),
+        image_id=image_id,
+        result="UNKNOWN",  # Classifier not yet integrated
+        image_quality_status=quality_status,
+        metrics=combined_metrics,
+        status="COMPLETED",
+    )
+
+    store.save_inspection(record)
+    store.save_logs(collected_logs)
+
+    return record, collected_logs
+

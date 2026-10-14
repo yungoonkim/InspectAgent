@@ -6,8 +6,35 @@ completely decoupled from product anomaly/defect (OK/NG) inspection decisions.
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import json
 import cv2
 import numpy as np
+
+
+def analyze_image_size(image: np.ndarray) -> Dict[str, int]:
+    """Analyze dimensions and channels of an image array.
+
+    Args:
+        image: Image array (NumPy ndarray).
+
+    Returns:
+        Dict with keys: 'width', 'height', 'channels'.
+
+    Raises:
+        ValueError: If input image is empty or not a valid NumPy array.
+    """
+    if image is None or not isinstance(image, np.ndarray) or image.size == 0:
+        raise ValueError("Invalid image provided for image size analysis.")
+
+    height = int(image.shape[0])
+    width = int(image.shape[1])
+    channels = int(image.shape[2]) if len(image.shape) > 2 else 1
+
+    return {
+        "width": width,
+        "height": height,
+        "channels": channels,
+    }
 
 
 def analyze_brightness(image: np.ndarray) -> Dict[str, float]:
@@ -53,21 +80,30 @@ def analyze_brightness(image: np.ndarray) -> Dict[str, float]:
 _BASELINE_CACHE: Optional[Dict[str, Any]] = None
 
 
-def compute_baseline_statistics(train_good_dir: Path, force_refresh: bool = False) -> Dict[str, Any]:
+def compute_baseline_statistics(
+    train_good_dir: Path,
+    force_refresh: bool = False,
+    save_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Compute normal brightness distribution statistics from dataset/bottle/train/good/.
 
     Calculates mean, std, percentiles (p1, p5, p50, p95, p99), min, and max across
-    all normal training images.
+    all normal training images. Optionally saves the results to a JSON file.
 
     Args:
         train_good_dir: Directory containing normal training bottle images.
         force_refresh: Whether to bypass in-memory cached statistics.
+        save_path: Optional file path to persist baseline statistics as JSON.
 
     Returns:
         Dict containing baseline distribution metrics and sample count.
     """
     global _BASELINE_CACHE
     if _BASELINE_CACHE is not None and not force_refresh:
+        if save_path is not None:
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(_BASELINE_CACHE, f, indent=2)
         return _BASELINE_CACHE
 
     if not train_good_dir.exists() or not train_good_dir.is_dir():
@@ -126,6 +162,11 @@ def compute_baseline_statistics(train_good_dir: Path, force_refresh: bool = Fals
             "p99": round(float(np.percentile(means_arr, 99)), 2),
         },
     }
+
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(baseline, f, indent=2)
 
     _BASELINE_CACHE = baseline
     return baseline
@@ -229,3 +270,63 @@ def evaluate_image_quality(
             "message": "Product defect/contamination inspection is separate from image quality assessment.",
         },
     }
+
+
+def analyze_image(
+    image: np.ndarray,
+    low_threshold: Optional[float] = None,
+    high_threshold: Optional[float] = None,
+    filename: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Perform comprehensive image analysis returning a JSON-serializable dictionary.
+
+    Combines dimension analysis, grayscale brightness metrics, and quality evaluation.
+    Enforces strict decoupling between environmental quality warnings and product OK/NG inspection.
+
+    Args:
+        image: Image array (NumPy ndarray).
+        low_threshold: Optional lower brightness threshold. If None, uses configured or default 125.0.
+        high_threshold: Optional upper brightness threshold. If None, uses configured or default 150.0.
+        filename: Optional image filename for context.
+
+    Returns:
+        JSON-serializable Dict containing size, brightness metrics, quality evaluation,
+        and decoupled product defect inspection status.
+    """
+    if low_threshold is None or high_threshold is None:
+        try:
+            from backend.config import get_settings
+            app_settings = get_settings()
+            effective_low = app_settings.BRIGHTNESS_LOW_THRESHOLD if low_threshold is None else low_threshold
+            effective_high = app_settings.BRIGHTNESS_HIGH_THRESHOLD if high_threshold is None else high_threshold
+        except Exception:
+            effective_low = 125.0 if low_threshold is None else low_threshold
+            effective_high = 150.0 if high_threshold is None else high_threshold
+    else:
+        effective_low = low_threshold
+        effective_high = high_threshold
+
+    size_metrics = analyze_image_size(image)
+    brightness_metrics = analyze_brightness(image)
+    quality_eval = evaluate_image_quality(
+        metrics=brightness_metrics,
+        low_threshold=effective_low,
+        high_threshold=effective_high,
+    )
+
+    result: Dict[str, Any] = {
+        "image_size": size_metrics,
+        "brightness_metrics": brightness_metrics,
+        "quality_evaluation": quality_eval,
+        # Product inspection verdict: Kept strictly decoupled
+        "product_defect_inspection": {
+            "status": "UNINSPECTED",
+            "verdict": "UNKNOWN",
+            "message": "Product anomaly/defect inspection is decoupled from image acquisition quality.",
+        },
+    }
+    if filename:
+        result["filename"] = filename
+
+    return result
+

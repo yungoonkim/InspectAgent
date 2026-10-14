@@ -1,0 +1,30 @@
+[
+  {
+    "scenario_id": "T01",
+    "product_id": "PROD-BOTTLE-T01",
+    "image_id": "IMG-BOTTLE-0084",
+    "execution_type": "standard_inspection",
+    "description": "Standard bottle inspection scenario under normal baseline operating conditions."
+  },
+  {
+    "scenario_id": "T03",
+    "product_id": "PROD-BOTTLE-T03",
+    "image_id": "IMG-BOTTLE-INJ-0001",
+    "execution_type": "quality_anomaly_inspection",
+    "description": "Inspection scenario with reduced illumination quality environment."
+  },
+  {
+    "scenario_id": "T05",
+    "product_id": "PROD-BOTTLE-T05",
+    "image_id": "IMG-BOTTLE-NONEXISTENT",
+    "execution_type": "input_failure_inspection",
+    "description": "Inspection scenario simulating unreadable or missing input image source."
+  },
+  {
+    "scenario_id": "T06",
+    "product_id": "PROD-BOTTLE-T06",
+    "image_id": "IMG-BOTTLE-0001",
+    "execution_type": "standard_inspection",
+    "description": "Inspection scenario executing standard vision pipeline on sample product."
+  }
+]

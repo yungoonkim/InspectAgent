@@ -122,10 +122,17 @@ uvicorn backend.main:app --reload
 
 ---
 
-## 🧪 테스트 실행
+## 🧪 테스트 및 시나리오 검증 실행
 
 ```powershell
-pytest
+# 1. 전체 pytest 테스트 스위트 (총 57개 테스트)
+pytest -v
+
+# 2. T03 오류 주입 이미지 생성 및 원본 SHA-256 검증
+python scripts/generate_t03_fault.py
+
+# 3. T01, T03, T05, T06 시나리오 2회 반복 자동 검증 러너
+python scripts/verify_day3_scenarios.py
 ```
 
 ---
@@ -138,29 +145,23 @@ pytest
 
 ---
 
-## 📅 Day 1 작업 내역 (완료)
+## 📅 마일스톤 및 작업 내역
 
-### 1. 목표 및 완료 기준
-- **목표:** MVTec AD Bottle 이미지 1장을 FastAPI에서 읽고 `POST /inspections` 요청에 고유 `inspection_id`를 발급하는 최소 백엔드 파이프라인 구축.
-- **완료 여부:** 100% 완료 및 테스트 16종 전원 통과.
+### Day 1: 기반 인프라 및 최초 검사 API (완료)
+- FastAPI 백엔드 구축 (`GET /health`, `GET /test-image`)
+- OpenCV 영상 품질 분석 및 0.6배 오류 주입 (`backend/vision.py`)
+- 중립 `image_id` 매핑 및 순차 고유 `inspection_id` 발급 (`POST /inspections`)
 
-### 2. 구현된 핵심 기능
+### Day 2: 밝기 통계 완성 및 JSONL 영구 저장 (완료)
+- 정상 209장 기준 통계 계산 및 임계값(`BRIGHTNESS_LOW_THRESHOLD = 125.0`) 반영
+- `data/inspections.jsonl` 및 `data/inspection_logs.jsonl` 스레드 세이프 저장소 구축
+- `POST /inspections` 요청 시 이미지 로드 -> 분석 -> 로그 -> 결과 저장 원스톱 파이프라인 완성
 
-| 구분 | 주요 내용 | 관련 모듈 |
-| :--- | :--- | :--- |
-| **기본 백엔드 구조** | - Miniconda `vision-insight` (Python 3.11) 환경 기반 구축<br>- `GET /health` (`{"status": "ok"}` 반환)<br>- `GET /test-image` (OpenCV 이미지 로드 및 메타데이터 반환) | `backend/main.py`<br>`backend/tools/image_loader.py` |
-| **OpenCV 영상 분석** | - Grayscale 변환 후 평균(`mean`), 표준편차(`std`), 최솟값/최댓값 계산<br>- 정상 209장 기준 통계(`baseline`) 집계 (정상 평균 136.34)<br>- 영상 품질(`NORMAL`, `WARNING_LOW_BRIGHTNESS`)과 제품 판정(`UNINSPECTED`) 분리 | `backend/vision.py`<br>`GET /analyze-brightness`<br>`GET /baseline/brightness` |
-| **0.6배 오류 주입** | - NumPy 기반 0.6배 밝기 감쇄 시뮬레이션 (`inject_brightness_fault`)<br>- 원본 데이터셋 보존 및 `data/outputs/injected/` 경로에 안전하게 분리 저장<br>- 전후 비교 API (`GET /test-image/compare-fault`) 제공 | `backend/vision.py`<br>`backend/main.py` |
-| **검사 식별자 및 정답 은닉** | - `product_id`와 `inspection_id` 엄격한 분리 (`INSP-000001`, `INSP-000002`...)<br>- `broken_large`, `contamination` 등 정답 레이블 폴더 은닉을 위한 중립 `image_id` (`IMG-BOTTLE-0001` ~ `0292`) 매핑<br>- `POST /inspections` 구현 (임의 경로 주입 차단 및 `result="UNKNOWN"` 반환) | `backend/inspection.py`<br>`POST /inspections`<br>`GET /inspections/images` |
-| **데이터 스키마 문서화** | - 식별자 설계, 정답 격리 원칙, ISO 8601 KST 타임스탬프, API 스키마 규격 정리 | `docs/inspection-data-schema.md` |
-
-### 3. 검증 현황 (`pytest`)
-- `pytest -v` 총 16개 테스트 전원 통과 (`16 passed in 3.60s`):
-  - 헬스체크 및 OpenAPI 문서 접근성 검증
-  - OpenCV 이미지 로드 및 404/422 예외 처리 검증
-  - 밝기 계산 및 0.6배 오류 주입 전후 비교 검증
-  - 변형 이미지 저장 시 원본 불변성 검증
-  - 연속 검사 요청 시 서로 다른 고유 `inspection_id` 발급 검증
-  - 허용되지 않은 경로 입력(Path Traversal) 차단 검증
-- Git 보안 검증 완료 (비밀키, 대용량 데이터셋, 변형 이미지 커밋 차단 확인).
+### Day 3: 오류 주입 시나리오 4종 및 평가 정답 물리적 격리 (완료)
+- **T01 (정상 검사)**: 정상 Bottle 원본 검사 (`IMG-BOTTLE-0084`), 품질 `NORMAL`, 결과 `UNKNOWN`
+- **T03 (조도 저하)**: 0.6배 밝기 감쇄 사본 검사 (`IMG-BOTTLE-INJ-0001`), 품질 `WARNING_LOW_BRIGHTNESS` (하드코딩 배제, 임계값 기반 동적 판정)
+- **T05 (로드 실패)**: 비프로덕션 테스트 stub 부재 경로 참조 (`IMG-BOTTLE-NONEXISTENT`), 404 Not Found 및 `IMAGE_LOAD_FAILED` / `INSPECTION_FAILED` 로깅 (`ANALYSIS_COMPLETED` 미발생 보장)
+- **T06 (불량 원본)**: MVTec `broken_large` 불량 원본 정상 흐름 처리 (`IMG-BOTTLE-0001`), 품질 `NORMAL`, 결과 `UNKNOWN` (제품 불량과 프로그램 오류의 엄격한 분리)
+- **정답 격리**: `Project/evaluation_private/`로 물리적 분리 및 운영 코드 무참조(Zero Reference) 달성
+- **통합 검증**: 57개 pytest 전체 통과 (`57 passed, 1 warning in 5.09s`), 2-Pass 재현 완수
 

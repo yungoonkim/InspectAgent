@@ -35,6 +35,9 @@ try:
         DATASET_PATH: str = Field(default="dataset/bottle", description="Path to MVTec AD bottle dataset")
         OUTPUT_DIR: str = Field(default="data/outputs", description="Path to save inspection output images")
         LOG_DIR: str = Field(default="data/logs", description="Path to store application and inspection logs")
+        INSPECTIONS_FILE: str = Field(default="data/inspections.jsonl", description="Path to inspections JSONL file")
+        INSPECTION_LOGS_FILE: str = Field(default="data/inspection_logs.jsonl", description="Path to inspection logs JSONL file")
+        TEST_DATA_DIR: str = Field(default="test_data", description="Path to test scenarios and test injected images")
 
         # Vision Quality & Fault Injection Settings
         # Normal bottle brightness mean is ~136.3 (p1: 133.5, p99: 139.5)
@@ -71,11 +74,37 @@ try:
             """Return resolved absolute path to fault-injected outputs directory."""
             return self.absolute_output_path / "injected"
 
+        @property
+        def absolute_inspections_path(self) -> Path:
+            """Return resolved absolute path to inspections JSONL file."""
+            path = Path(self.INSPECTIONS_FILE)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_inspection_logs_path(self) -> Path:
+            """Return resolved absolute path to inspection logs JSONL file."""
+            path = Path(self.INSPECTION_LOGS_FILE)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_test_data_path(self) -> Path:
+            """Return resolved absolute path to test_data directory."""
+            path = Path(self.TEST_DATA_DIR)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_injected_images_path(self) -> Path:
+            """Return resolved absolute path to test_data/injected_images directory."""
+            return self.absolute_test_data_path / "injected_images"
+
         def ensure_directories(self) -> None:
-            """Create required output and log directories if they don't exist."""
+            """Create required output, log, data, and test directories if they don't exist."""
             self.absolute_output_path.mkdir(parents=True, exist_ok=True)
             self.absolute_injected_path.mkdir(parents=True, exist_ok=True)
             self.absolute_log_path.mkdir(parents=True, exist_ok=True)
+            self.absolute_inspections_path.parent.mkdir(parents=True, exist_ok=True)
+            self.absolute_inspection_logs_path.parent.mkdir(parents=True, exist_ok=True)
+            self.absolute_injected_images_path.mkdir(parents=True, exist_ok=True)
 
 except ImportError:
     # Fallback when pydantic-settings is not yet installed
@@ -93,9 +122,12 @@ except ImportError:
             self.DATASET_PATH = os.getenv("DATASET_PATH", "dataset/bottle")
             self.OUTPUT_DIR = os.getenv("OUTPUT_DIR", "data/outputs")
             self.LOG_DIR = os.getenv("LOG_DIR", "data/logs")
+            self.INSPECTIONS_FILE = os.getenv("INSPECTIONS_FILE", "data/inspections.jsonl")
+            self.INSPECTION_LOGS_FILE = os.getenv("INSPECTION_LOGS_FILE", "data/inspection_logs.jsonl")
             self.BRIGHTNESS_LOW_THRESHOLD = float(os.getenv("BRIGHTNESS_LOW_THRESHOLD", "125.0"))
             self.BRIGHTNESS_HIGH_THRESHOLD = float(os.getenv("BRIGHTNESS_HIGH_THRESHOLD", "150.0"))
             self.FAULT_INJECTION_FACTOR = float(os.getenv("FAULT_INJECTION_FACTOR", "0.6"))
+            self.TEST_DATA_DIR = os.getenv("TEST_DATA_DIR", "test_data")
 
         @property
         def absolute_dataset_path(self) -> Path:
@@ -116,10 +148,34 @@ except ImportError:
         def absolute_injected_path(self) -> Path:
             return self.absolute_output_path / "injected"
 
+        @property
+        def absolute_test_data_path(self) -> Path:
+            path = Path(self.TEST_DATA_DIR)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_injected_images_path(self) -> Path:
+            return self.absolute_test_data_path / "injected_images"
+
+        @property
+        def absolute_inspections_path(self) -> Path:
+            path = Path(self.INSPECTIONS_FILE)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_inspection_logs_path(self) -> Path:
+            path = Path(self.INSPECTION_LOGS_FILE)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
         def ensure_directories(self) -> None:
             self.absolute_output_path.mkdir(parents=True, exist_ok=True)
             self.absolute_injected_path.mkdir(parents=True, exist_ok=True)
+            self.absolute_test_data_path.mkdir(parents=True, exist_ok=True)
+            self.absolute_injected_images_path.mkdir(parents=True, exist_ok=True)
             self.absolute_log_path.mkdir(parents=True, exist_ok=True)
+            self.absolute_inspections_path.parent.mkdir(parents=True, exist_ok=True)
+            self.absolute_inspection_logs_path.parent.mkdir(parents=True, exist_ok=True)
+
 
 
 @lru_cache()

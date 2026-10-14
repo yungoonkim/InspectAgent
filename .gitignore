@@ -250,4 +250,13 @@ data/outputs/**
 data/logs/**
 !data/logs/
 !data/logs/.gitkeep
+data/inspections.jsonl
+data/inspection_logs.jsonl
 *.log
+
+# Test data generated injected images
+test_data/injected_images/**
+!test_data/injected_images/
+!test_data/injected_images/.gitkeep
+
+

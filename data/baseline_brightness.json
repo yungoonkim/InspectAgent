@@ -1,0 +1,16 @@
+{
+  "status": "ready",
+  "sample_count": 209,
+  "mean_of_means": 136.34,
+  "std_of_means": 1.38,
+  "min_mean": 133.37,
+  "max_mean": 139.55,
+  "average_internal_std": 92.89,
+  "percentiles": {
+    "p1": 133.54,
+    "p5": 134.16,
+    "p50": 136.17,
+    "p95": 138.7,
+    "p99": 139.48
+  }
+}

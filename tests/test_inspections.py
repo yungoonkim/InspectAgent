@@ -1,10 +1,12 @@
 """Tests for Day 1 inspection execution and ID assignment."""
 
+from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.inspection import get_image_registry
+from backend.storage import EventCode, StorageWriteError, get_inspection_storage
 
 
 @pytest.fixture
@@ -117,3 +119,94 @@ def test_post_inspections_rejects_unregistered_or_arbitrary_path(client: TestCli
     }
     resp2 = client.post("/inspections", json=payload_fake)
     assert resp2.status_code == 400
+
+
+def test_post_inspections_persists_to_jsonl_and_links_logs(client: TestClient):
+    """Verify POST /inspections persists both result and event logs connected by inspection_id."""
+    registry = get_image_registry()
+    sample_ids = registry.list_image_ids()
+    if not sample_ids:
+        pytest.skip("No dataset images registered, skipping test.")
+
+    target_image_id = sample_ids[0]
+    payload = {
+        "product_id": "ABCD1541",
+        "image_id": target_image_id,
+    }
+
+    response = client.post("/inspections", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+
+    inspection_id = data["inspection_id"]
+    assert data["image_quality_status"] == "NORMAL"
+    assert "mean" in data["metrics"]
+    assert "std" in data["metrics"]
+    assert data["result"] == "UNKNOWN"
+
+    # Verify storage contains the record in inspections.jsonl
+    storage = get_inspection_storage()
+    saved_record = storage.get_inspection(inspection_id)
+    assert saved_record is not None
+    assert saved_record.inspection_id == inspection_id
+    assert saved_record.product_id == "ABCD1541"
+    assert saved_record.image_quality_status == "NORMAL"
+    assert saved_record.status == "COMPLETED"
+
+    # Verify execution logs in inspection_logs.jsonl
+    saved_logs = storage.get_logs(inspection_id)
+    assert len(saved_logs) == 4
+    for log in saved_logs:
+        assert log.inspection_id == inspection_id
+
+    event_codes = [log.event_code for log in saved_logs]
+    assert event_codes == [
+        EventCode.INSPECTION_STARTED,
+        EventCode.IMAGE_LOADED,
+        EventCode.ANALYSIS_COMPLETED,
+        EventCode.INSPECTION_COMPLETED,
+    ]
+
+
+def test_post_inspections_load_failure_logs_events(client: TestClient):
+    """Verify that an image load failure logs failure events in storage before returning 400."""
+    payload_fake = {
+        "product_id": "PROD-ERR-01",
+        "image_id": "IMG-BOTTLE-INVALID-999",
+    }
+    response = client.post("/inspections", json=payload_fake)
+    assert response.status_code == 400
+
+    storage = get_inspection_storage()
+    recent_inspections = storage.list_inspections(limit=1, product_id="PROD-ERR-01")
+    assert len(recent_inspections) == 1
+
+    failed_rec = recent_inspections[0]
+    assert failed_rec.status == "FAILED"
+    assert failed_rec.image_quality_status == "ERROR"
+
+    failed_logs = storage.get_logs(failed_rec.inspection_id)
+    events = [l.event_code for l in failed_logs]
+    assert EventCode.IMAGE_LOAD_FAILED in events
+    assert EventCode.INSPECTION_FAILED in events
+    # ANALYSIS_COMPLETED must NEVER be logged on load failure
+    assert EventCode.ANALYSIS_COMPLETED not in events
+
+
+def test_post_inspections_storage_write_failure_returns_500(client: TestClient):
+    """Verify that when storage write fails, HTTP 500 is returned rather than a false positive completed status."""
+    registry = get_image_registry()
+    sample_ids = registry.list_image_ids()
+    if not sample_ids:
+        pytest.skip("No dataset images registered, skipping test.")
+
+    payload = {
+        "product_id": "ABCD1541",
+        "image_id": sample_ids[0],
+    }
+
+    with patch("backend.storage.JsonlInspectionStorage.save_inspection", side_effect=StorageWriteError("Disk full")):
+        response = client.post("/inspections", json=payload)
+        assert response.status_code == 500
+        assert "storage" in response.json()["detail"].lower()
+

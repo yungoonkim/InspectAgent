@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import hashlib
+import json
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,8 @@ from backend.main import app
 from backend.config import get_settings
 from backend.vision import (
     analyze_brightness,
+    analyze_image_size,
+    analyze_image,
     compute_baseline_statistics,
     inject_brightness_fault,
     save_modified_image,
@@ -165,3 +168,126 @@ def test_api_analyze_and_compare_fault(client: TestClient):
 
     # Check saved image exists in injected output folder
     assert Path(fault_item["saved_path"]).exists()
+
+
+def test_analyze_image_size():
+    """Verify analyze_image_size correctly extracts dimensions and channels."""
+    # 3-channel color image
+    color_img = np.zeros((480, 640, 3), dtype=np.uint8)
+    size_info = analyze_image_size(color_img)
+    assert size_info["width"] == 640
+    assert size_info["height"] == 480
+    assert size_info["channels"] == 3
+
+    # 1-channel grayscale image
+    gray_img = np.zeros((300, 400), dtype=np.uint8)
+    gray_size = analyze_image_size(gray_img)
+    assert gray_size["width"] == 400
+    assert gray_size["height"] == 300
+    assert gray_size["channels"] == 1
+
+    # Invalid input
+    with pytest.raises(ValueError):
+        analyze_image_size(None)  # type: ignore
+
+    with pytest.raises(ValueError):
+        analyze_image_size(np.array([]))
+
+
+def test_analyze_image_returns_json_serializable():
+    """Verify analyze_image returns a structured dictionary that is directly JSON serializable."""
+    sample_img = np.full((100, 100, 3), 136, dtype=np.uint8)
+    result = analyze_image(sample_img, filename="sample.png")
+
+    # Must be JSON-serializable without errors
+    serialized = json.dumps(result)
+    assert isinstance(serialized, str)
+    deserialized = json.loads(serialized)
+
+    assert "image_size" in deserialized
+    assert deserialized["image_size"]["width"] == 100
+    assert deserialized["image_size"]["height"] == 100
+    assert deserialized["image_size"]["channels"] == 3
+
+    assert "brightness_metrics" in deserialized
+    assert deserialized["brightness_metrics"]["mean"] == 136.0
+
+    assert "quality_evaluation" in deserialized
+    assert deserialized["quality_evaluation"]["quality_status"] == "NORMAL"
+    assert deserialized["quality_evaluation"]["warning_triggered"] is False
+
+    # Product defect inspection must be decoupled
+    assert "product_defect_inspection" in deserialized
+    assert deserialized["product_defect_inspection"]["status"] == "UNINSPECTED"
+
+
+def test_analyze_image_normal_vs_brightness_reduced():
+    """Verify analyze_image correctly distinguishes normal and brightness-reduced images."""
+    settings = get_settings()
+    # Baseline bottle brightness is ~136.3
+    normal_img = np.full((100, 100, 3), 136, dtype=np.uint8)
+    normal_res = analyze_image(normal_img)
+
+    assert normal_res["quality_evaluation"]["quality_status"] == "NORMAL"
+    assert normal_res["quality_evaluation"]["warning_triggered"] is False
+    assert normal_res["product_defect_inspection"]["status"] == "UNINSPECTED"
+
+    # Injected brightness reduction (0.6x factor -> 136 * 0.6 = 81.6)
+    reduced_img = inject_brightness_fault(normal_img, factor=settings.FAULT_INJECTION_FACTOR)
+    reduced_res = analyze_image(reduced_img)
+
+    assert reduced_res["brightness_metrics"]["mean"] < settings.BRIGHTNESS_LOW_THRESHOLD
+    assert reduced_res["quality_evaluation"]["quality_status"] == "WARNING_LOW_BRIGHTNESS"
+    assert reduced_res["quality_evaluation"]["warning_triggered"] is True
+    # Product defect status must remain UNINSPECTED even when quality warning is active
+    assert reduced_res["product_defect_inspection"]["status"] == "UNINSPECTED"
+
+
+def test_configurable_brightness_thresholds():
+    """Verify that brightness warning evaluation responds dynamically to custom/configured thresholds."""
+    # Test image with mean brightness 136.0
+    img = np.full((100, 100, 3), 136, dtype=np.uint8)
+
+    # 1. Under standard thresholds [125.0, 150.0] -> NORMAL
+    res_default = analyze_image(img, low_threshold=125.0, high_threshold=150.0)
+    assert res_default["quality_evaluation"]["quality_status"] == "NORMAL"
+    assert res_default["quality_evaluation"]["warning_triggered"] is False
+
+    # 2. Adjust low_threshold up to 140.0 -> Triggers WARNING_LOW_BRIGHTNESS
+    res_tight_low = analyze_image(img, low_threshold=140.0, high_threshold=150.0)
+    assert res_tight_low["quality_evaluation"]["quality_status"] == "WARNING_LOW_BRIGHTNESS"
+    assert res_tight_low["quality_evaluation"]["warning_triggered"] is True
+    assert res_tight_low["quality_evaluation"]["applied_thresholds"]["low_threshold"] == 140.0
+
+    # 3. Adjust high_threshold down to 130.0 -> Triggers WARNING_HIGH_BRIGHTNESS
+    res_tight_high = analyze_image(img, low_threshold=100.0, high_threshold=130.0)
+    assert res_tight_high["quality_evaluation"]["quality_status"] == "WARNING_HIGH_BRIGHTNESS"
+    assert res_tight_high["quality_evaluation"]["warning_triggered"] is True
+    assert res_tight_high["quality_evaluation"]["applied_thresholds"]["high_threshold"] == 130.0
+
+
+def test_persisted_baseline_brightness_json():
+    """Verify data/baseline_brightness.json accurately records the calculated Bottle baseline statistics."""
+    from backend.config import PROJECT_ROOT
+
+    json_path = PROJECT_ROOT / "data" / "baseline_brightness.json"
+    assert json_path.exists(), "data/baseline_brightness.json must be created and persisted"
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data["status"] == "ready"
+    assert data["sample_count"] == 209
+    assert data["mean_of_means"] == 136.34
+    assert data["std_of_means"] == 1.38
+    assert data["min_mean"] == 133.37
+    assert data["max_mean"] == 139.55
+    assert data["average_internal_std"] == 92.89
+
+    percentiles = data["percentiles"]
+    assert percentiles["p1"] == 133.54
+    assert percentiles["p5"] == 134.16
+    assert percentiles["p50"] == 136.17
+    assert percentiles["p95"] == 138.7
+    assert percentiles["p99"] == 139.48
+

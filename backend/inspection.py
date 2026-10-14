@@ -22,6 +22,7 @@ from backend.storage import (
     get_inspection_storage,
     get_utc_now_iso,
 )
+from backend.decision import FinalReasonCode, FinalResult, determine_final_verdict
 
 
 class InspectionIdGenerator:
@@ -253,6 +254,19 @@ def execute_inspection(
     }
 
 
+def _sanitize_error_message(err: Exception) -> str:
+    """Sanitize error messages to prevent leaking server internal paths or ground truth details.
+
+    Converts raw exceptions containing file system paths or internal dataset directories
+    into neutral, safe error descriptions.
+    """
+    raw_msg = str(err)
+    sensitive_markers = [":\\", ":/", "/dataset", "\\dataset", "ground_truth", "broken_large", "broken_small", "contamination"]
+    if any(marker in raw_msg.lower() for marker in sensitive_markers):
+        return f"{type(err).__name__}: An internal error occurred during ML inference processing."
+    return f"{type(err).__name__}: {raw_msg}"
+
+
 def execute_inspection_workflow(
     product_id: str,
     image_id: str,
@@ -261,6 +275,8 @@ def execute_inspection_workflow(
     storage: Optional[InspectionStorageBase] = None,
     low_threshold: Optional[float] = None,
     high_threshold: Optional[float] = None,
+    inferencer: Optional[Any] = None,
+    decision_threshold: Optional[float] = None,
 ) -> Tuple[InspectionRecord, List[InspectionLogRecord]]:
     """Execute Day 2 inspection workflow with end-to-end JSONL logging and record persistence.
 
@@ -336,6 +352,9 @@ def execute_inspection_workflow(
             image_quality_status="ERROR",
             metrics={"error": err_msg},
             status="FAILED",
+            defect_detection_status="SKIPPED",
+            final_result=FinalResult.ERROR,
+            final_reason_code=FinalReasonCode.INSPECTION_FAILED,
         )
         store.save_inspection(failed_record)
         store.save_logs(collected_logs)
@@ -374,6 +393,9 @@ def execute_inspection_workflow(
             image_quality_status="ERROR",
             metrics={"error": err_msg},
             status="FAILED",
+            defect_detection_status="SKIPPED",
+            final_result=FinalResult.ERROR,
+            final_reason_code=FinalReasonCode.INSPECTION_FAILED,
         )
         store.save_inspection(failed_record)
         store.save_logs(collected_logs)
@@ -413,6 +435,9 @@ def execute_inspection_workflow(
             image_quality_status="ERROR",
             metrics={"error": err_msg},
             status="FAILED",
+            defect_detection_status="SKIPPED",
+            final_result=FinalResult.ERROR,
+            final_reason_code=FinalReasonCode.INSPECTION_FAILED,
         )
         store.save_inspection(failed_record)
         store.save_logs(collected_logs)
@@ -429,7 +454,7 @@ def execute_inspection_workflow(
         stage=InspectionStage.LOAD,
         event_code=EventCode.IMAGE_LOADED,
         message=f"Image loaded successfully ({width}x{height}, {channels} channels)",
-        metrics={"width": width, "height": height, "channels": channels, "filename": image_path.name},
+        metrics={"width": width, "height": height, "channels": channels, "image_id": image_id},
         source="vision",
     )
     collected_logs.append(load_success_log)
@@ -439,7 +464,7 @@ def execute_inspection_workflow(
         image=image,
         low_threshold=low_threshold,
         high_threshold=high_threshold,
-        filename=image_path.name,
+        filename=f"{image_id}.png",
     )
 
     quality_eval = analysis["quality_evaluation"]
@@ -460,34 +485,156 @@ def execute_inspection_workflow(
     )
     collected_logs.append(analysis_log)
 
-    # 5. Stage: COMPLETE -> Record final completion
+    # 5. Stage: INFERENCE -> Execute PatchCore anomaly detection if inferencer is active
+    anomaly_score: Optional[float] = None
+    inference_time_ms: Optional[float] = None
+    model_version: Optional[str] = None
+    defect_detection_status: str = "SKIPPED"
+    inference_error_msg: Optional[str] = None
+
+    if inferencer is not None:
+        infer_start_log = InspectionLogRecord(
+            timestamp=get_utc_now_iso(),
+            inspection_id=inspection_id,
+            level=LogLevel.INFO,
+            stage=InspectionStage.INFERENCE,
+            event_code=EventCode.INFERENCE_STARTED,
+            message="PatchCore anomaly inference started",
+            source="ml",
+        )
+        collected_logs.append(infer_start_log)
+
+        try:
+            pred = inferencer.predict(image)
+            anomaly_score = float(pred["anomaly_score"])
+            inference_time_ms = float(pred["inference_time_ms"])
+            model_version = str(pred.get("model_name", "PatchCore"))
+            defect_detection_status = "COMPLETED"
+
+            infer_done_log = InspectionLogRecord(
+                timestamp=get_utc_now_iso(),
+                inspection_id=inspection_id,
+                level=LogLevel.INFO,
+                stage=InspectionStage.INFERENCE,
+                event_code=EventCode.INFERENCE_COMPLETED,
+                message=f"PatchCore anomaly inference completed. Score: {anomaly_score:.4f}, Latency: {inference_time_ms:.2f}ms",
+                metrics={
+                    "anomaly_score": anomaly_score,
+                    "inference_time_ms": inference_time_ms,
+                    "model": model_version,
+                    "defect_detection_status": defect_detection_status,
+                },
+                source="ml",
+            )
+            collected_logs.append(infer_done_log)
+        except Exception as infer_err:
+            defect_detection_status = "FAILED"
+            inference_error_msg = _sanitize_error_message(infer_err)
+            infer_fail_log = InspectionLogRecord(
+                timestamp=get_utc_now_iso(),
+                inspection_id=inspection_id,
+                level=LogLevel.ERROR,
+                stage=InspectionStage.INFERENCE,
+                event_code=EventCode.INFERENCE_FAILED,
+                message=f"PatchCore inference failed: {inference_error_msg}",
+                source="ml",
+            )
+            collected_logs.append(infer_fail_log)
+
+    # 6. Stage: DECISION -> Determine product OK / NG / UNKNOWN verdict
+    verdict: str = "UNKNOWN"
+    decision_confidence: str = "NOT_APPLICABLE"
+
+    if defect_detection_status == "COMPLETED" and decision_threshold is not None and anomaly_score is not None:
+        if anomaly_score > decision_threshold:
+            verdict = "NG"
+        else:
+            verdict = "OK"
+
+        if is_warning:
+            decision_confidence = "UNCERTAIN_DUE_TO_IMAGE_QUALITY"
+        else:
+            decision_confidence = "HIGH"
+
+    # Evaluate comprehensive final verdict
+    final_result, final_reason_code = determine_final_verdict(
+        status="COMPLETED",
+        image_quality_status=quality_status,
+        defect_detection_status=defect_detection_status,
+        result=verdict,
+    )
+
+    # 7. Stage: COMPLETE -> Record final completion
+    score_desc = f", Score: {anomaly_score:.4f}" if anomaly_score is not None else ""
+    if is_warning and defect_detection_status == "COMPLETED":
+        complete_level = LogLevel.WARN
+        complete_msg = (
+            f"Inspection completed with image quality warning ({quality_status}). "
+            f"Final: {final_result} ({final_reason_code}), Product: {verdict}{score_desc}"
+        )
+    else:
+        complete_level = LogLevel.INFO
+        complete_msg = f"Inspection completed successfully. Final: {final_result} ({final_reason_code}), Quality: {quality_status}, Verdict: {verdict}{score_desc}"
+
+    complete_metrics: Dict[str, Any] = {
+        "verdict": verdict,
+        "defect_detection_status": defect_detection_status,
+        "image_quality_status": quality_status,
+        "final_result": final_result,
+        "final_reason_code": final_reason_code,
+    }
+    if anomaly_score is not None:
+        complete_metrics["anomaly_score"] = anomaly_score
+    if decision_threshold is not None:
+        complete_metrics["decision_threshold"] = decision_threshold
+    if decision_confidence != "NOT_APPLICABLE":
+        complete_metrics["decision_confidence"] = decision_confidence
+
     complete_log = InspectionLogRecord(
         timestamp=get_utc_now_iso(),
         inspection_id=inspection_id,
-        level=LogLevel.INFO,
+        level=complete_level,
         stage=InspectionStage.COMPLETE,
         event_code=EventCode.INSPECTION_COMPLETED,
-        message=f"Inspection completed successfully. Quality: {quality_status}, Verdict: UNKNOWN",
+        message=complete_msg,
+        metrics=complete_metrics,
         source="inspection",
     )
     collected_logs.append(complete_log)
 
-    # 6. Build and persist InspectionRecord
+    # 8. Build and persist InspectionRecord
     combined_metrics: Dict[str, Any] = {
         **analysis["image_size"],
         **brightness_metrics,
-        "filename": image_path.name,
+        "filename": f"{image_id}.png",
+        "defect_detection_status": defect_detection_status,
+        "decision_confidence": decision_confidence,
+        "final_result": final_result,
+        "final_reason_code": final_reason_code,
     }
+    if inference_error_msg is not None:
+        combined_metrics["defect_detection_error"] = inference_error_msg
+    if anomaly_score is not None:
+        combined_metrics["anomaly_score"] = anomaly_score
+        combined_metrics["inference_time_ms"] = inference_time_ms
+        combined_metrics["model_version"] = model_version
+        combined_metrics["decision_threshold"] = decision_threshold
 
     record = InspectionRecord(
         inspection_id=inspection_id,
         product_id=product_id,
         timestamp=get_utc_now_iso(),
         image_id=image_id,
-        result="UNKNOWN",  # Classifier not yet integrated
+        result=verdict,
         image_quality_status=quality_status,
         metrics=combined_metrics,
         status="COMPLETED",
+        anomaly_score=anomaly_score,
+        decision_threshold=decision_threshold,
+        inference_time_ms=inference_time_ms,
+        defect_detection_status=defect_detection_status,
+        final_result=final_result,
+        final_reason_code=final_reason_code,
     )
 
     store.save_inspection(record)

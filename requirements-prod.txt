@@ -1,0 +1,25 @@
+# ==============================================================================
+# VisionInsight Production Dependencies (Cloud Run CPU Inference Only)
+# ==============================================================================
+# PyTorch CPU wheels from official PyTorch download index
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# PyTorch & TorchVision CPU builds (zero CUDA/GPU bloat)
+torch==2.6.0+cpu
+torchvision==0.21.0+cpu
+
+# Core Web Framework & ASGI Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+
+# Computer Vision & Headless Processing
+opencv-python-headless>=4.9.0.80
+numpy>=1.26.0
+
+# Industrial Anomaly Detection
+anomalib==2.7.0
+timm==1.0.30
+
+# Configuration & Environment
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0

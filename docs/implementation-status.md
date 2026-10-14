@@ -15,7 +15,8 @@ VisionInsight 프로젝트의 Day 1 (FastAPI 기반 검사 ID 발급 및 이미�
 | **Day 1** | Bottle 이미지 로드 + `POST /inspections` 검사 ID 반환 | **완료** | 순차적 고유 ID(`INSP-XXXXXX`) 발급, 중립 `image_id` 매핑 |
 | **Day 2** | OpenCV 밝기 지표 계산 + JSONL 검사/이벤트 로그 자동 저장 | **완료** | `train/good` 정상 통계 기반 임계값, 스레드 세이프 JSONL 저장 |
 | **Day 3** | T01/T03/T05/T06 반복 재현 + 평가 정답 물리적 격리 | **완료** | 4대 시나리오 실측 검증 완료, 정답 라벨 100% 은닉, 57개 테스트 PASS |
-| **Day 4** | Gemini AI Agent 실제 도구 호출 + 구조화 보고서 | 대기 | Day 3 검사 API 및 JSONL 데이터 기반 Agent 도구 연동 예정 |
+| **Day 3.5** | PatchCore 이상 검출 + 종합 판정 + Cloud Run 배포 준비 + 보안 점검 | **완료** (프롬프트 8 완료) | 180장 Coreset 학습, 29장 독립 검증, 임계값 34.1442, final_result 정책, Cloud Run CPU Dockerfile, 데이터 접근 정책 수립, 104개 테스트 PASS |
+| **Day 4** | Gemini AI Agent 실제 도구 호출 + 구조화 보고서 | 대기 | Day 3.5 검사 API 및 JSONL 데이터 기반 4대 Agent 도구 연동 예정 |
 | **Day 5** | 상황별 추가 조사 + 반례 평가 | 대기 | Agent 심층 진단 및 가설 수립 기능 |
 | **Day 6** | React E2E + Cloud Run 준비 | 대기 | 웹 대시보드 프론트엔드 및 컨테이너 빌드 |
 | **Day 7** | Cloud Run HTTPS API / Agent 분석 검증 + 최종 문서화 | 대기 | 배포 환경 검증 |

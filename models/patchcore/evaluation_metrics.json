@@ -1,0 +1,73 @@
+{
+  "evaluation_timestamp": "2026-10-14T09:52:01Z",
+  "model_version": "PatchCore",
+  "checkpoint": "patchcore_bottle.ckpt",
+  "train_image_count": 180,
+  "val_image_count": 29,
+  "test_image_count": 83,
+  "threshold": 34.1442,
+  "calibration_method": "mean_plus_3std",
+  "confusion_matrix": {
+    "TN": 20,
+    "FP": 0,
+    "FN": 31,
+    "TP": 32
+  },
+  "performance": {
+    "accuracy": 0.6265060240963856,
+    "precision": 1.0,
+    "recall": 0.5079365079365079,
+    "specificity": 1.0,
+    "f1_score": 0.6736842105263158,
+    "image_auroc": 0.8285714285714286
+  },
+  "average_inference_latency_ms": 42.525783132530115,
+  "category_breakdown": {
+    "good": {
+      "count": 20,
+      "correct": 20,
+      "accuracy_or_recall": 1.0,
+      "mean": 30.54675426483154,
+      "std": 0.928444062755899,
+      "min": 28.9453067779541,
+      "max": 32.80786895751953,
+      "median": 30.337136268615723
+    },
+    "broken_large": {
+      "count": 20,
+      "correct": 11,
+      "accuracy_or_recall": 0.55,
+      "mean": 36.5211275100708,
+      "std": 5.309930407216752,
+      "min": 29.670909881591797,
+      "max": 48.660701751708984,
+      "median": 35.715301513671875
+    },
+    "broken_small": {
+      "count": 22,
+      "correct": 16,
+      "accuracy_or_recall": 0.7272727272727273,
+      "mean": 38.094874295321375,
+      "std": 4.993284456514484,
+      "min": 29.994882583618164,
+      "max": 46.17304992675781,
+      "median": 37.93452072143555
+    },
+    "contamination": {
+      "count": 21,
+      "correct": 5,
+      "accuracy_or_recall": 0.23809523809523808,
+      "mean": 33.225580487932476,
+      "std": 4.514285879908173,
+      "min": 29.500019073486328,
+      "max": 43.79834747314453,
+      "median": 31.199995040893555
+    }
+  },
+  "fp_count": 0,
+  "fn_count": 31,
+  "pixel_evaluation": {
+    "performed": false,
+    "reason": "Ground truth mask directory ('dataset/bottle/ground_truth') does not exist in local workspace. In strict accordance with VisionInsight AGENTS.md Data Safety Rule 2 ('ground_truth masks are kept in an external evaluation environment'), pixel-level AUROC and IoU are not measurable locally."
+  }
+}

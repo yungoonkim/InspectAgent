@@ -4,6 +4,7 @@ This module provides health check, image loading, brightness analysis,
 and fault injection comparison endpoints for the MVTec AD Bottle inspection AI Agent service.
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 import cv2
@@ -27,13 +28,32 @@ from backend.inspection import (
     get_image_registry,
 )
 from backend.storage import StorageError, get_inspection_storage
+from backend.ml.patchcore_inferencer import get_patchcore_inferencer
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI application lifespan context manager.
+
+    Pre-loads PatchCore model into memory on server startup when enabled,
+    avoiding per-request model loading overhead.
+    """
+    current_settings = get_settings()
+    if getattr(current_settings, "ENABLE_PATCHCORE", True):
+        try:
+            get_patchcore_inferencer()
+        except Exception:
+            pass  # Warning/error logged internally
+    yield
+
 
 app = FastAPI(
     title="InspectAgent API",
     description="MVTec AD Bottle dataset-based industrial vision inspection anomaly diagnosis AI Agent service",
     version=settings.APP_VERSION,
+    lifespan=lifespan,
 )
 
 # CORS middleware for development and deployment
@@ -151,6 +171,41 @@ class InspectionResponse(BaseModel):
         description="Vision inspection metrics (brightness, standard deviation, dimensions)",
     )
     image_metadata: ImageMetadataResponse
+    anomaly_score: Optional[float] = Field(
+        default=None,
+        description="PatchCore anomaly distance score (None if model disabled or uninspected)",
+        examples=[30.506],
+    )
+    inference_time_ms: Optional[float] = Field(
+        default=None,
+        description="PatchCore inference latency in milliseconds",
+        examples=[45.2],
+    )
+    model_version: Optional[str] = Field(
+        default=None,
+        description="Anomaly detection model version or identifier",
+        examples=["PatchCore"],
+    )
+    decision_threshold: Optional[float] = Field(
+        default=None,
+        description="Applied anomaly score threshold (None = uncalibrated)",
+        examples=[None],
+    )
+    defect_detection_status: Optional[str] = Field(
+        default=None,
+        description="ML defect detection lifecycle status: COMPLETED | FAILED | SKIPPED | UNINSPECTED",
+        examples=["COMPLETED"],
+    )
+    final_result: Optional[str] = Field(
+        default=None,
+        description="Authoritative final verdict: OK | NG | REINSPECT | ERROR",
+        examples=["OK"],
+    )
+    final_reason_code: Optional[str] = Field(
+        default=None,
+        description="Reason code for authoritative final verdict",
+        examples=["ALL_CHECKS_PASSED"],
+    )
 
 
 
@@ -377,9 +432,10 @@ def create_inspection_endpoint(
     payload: InspectionCreateRequest,
     current_settings: Settings = Depends(get_settings),
 ) -> InspectionResponse:
-    """Execute Day 2 inspection workflow with automated JSONL logging and persistence."""
+    """Execute inspection workflow with automated JSONL logging, brightness analysis, and PatchCore inference."""
     registry = get_image_registry(current_settings)
     storage = get_inspection_storage()
+    inferencer = get_patchcore_inferencer() if getattr(current_settings, "ENABLE_PATCHCORE", True) else None
 
     try:
         record, logs = execute_inspection_workflow(
@@ -389,10 +445,12 @@ def create_inspection_endpoint(
             storage=storage,
             low_threshold=current_settings.BRIGHTNESS_LOW_THRESHOLD,
             high_threshold=current_settings.BRIGHTNESS_HIGH_THRESHOLD,
+            inferencer=inferencer,
+            decision_threshold=current_settings.DECISION_THRESHOLD,
         )
 
         image_metadata = ImageMetadataResponse(
-            filename=str(record.metrics.get("filename", f"{record.image_id}.png")),
+            filename=f"{record.image_id}.png",
             width=int(record.metrics.get("width", 0)),
             height=int(record.metrics.get("height", 0)),
             channels=int(record.metrics.get("channels", 3)),
@@ -408,6 +466,13 @@ def create_inspection_endpoint(
             image_quality_status=record.image_quality_status,
             metrics=record.metrics,
             image_metadata=image_metadata,
+            anomaly_score=record.anomaly_score,
+            inference_time_ms=record.inference_time_ms,
+            model_version=record.metrics.get("model_version"),
+            decision_threshold=record.decision_threshold,
+            defect_detection_status=record.defect_detection_status,
+            final_result=record.final_result,
+            final_reason_code=record.final_reason_code,
         )
     except KeyError as err:
         raise HTTPException(status_code=400, detail=str(err))
@@ -445,4 +510,5 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=(settings.ENVIRONMENT == "local"),
+        reload_dirs=["backend"] if settings.ENVIRONMENT == "local" else None,
     )

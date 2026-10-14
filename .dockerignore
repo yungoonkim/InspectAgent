@@ -1,0 +1,39 @@
+# Git & Version Control
+.git
+.gitignore
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Environment & Secrets
+.env
+*.local
+venv/
+.venv/
+env/
+
+# Datasets, Ground Truth & Splits (Strict Security & AGENTS.md Rule 2, 9)
+dataset/
+data/splits/
+evaluation_private/
+*evaluation_answers*.json
+*mask_pairs*.json
+ground_truth/
+**/ground_truth/**
+data/inspections.jsonl
+data/inspection_logs.jsonl
+models/patchcore/patchcore_bottle_all209.ckpt
+
+# Tests & Evaluation Scripts (Excluded from production container)
+tests/
+scripts/
+
+# Documentation & Scratch Artifacts
+docs/
+scratch/

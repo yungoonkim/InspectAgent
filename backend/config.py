@@ -45,6 +45,16 @@ try:
         BRIGHTNESS_HIGH_THRESHOLD: float = Field(default=150.0, description="Upper threshold for image brightness warning")
         FAULT_INJECTION_FACTOR: float = Field(default=0.6, description="Multiplier for artificial brightness fault injection")
 
+        # PatchCore ML Defect Inspection Settings
+        ENABLE_PATCHCORE: bool = Field(default=True, description="Enable PatchCore ML defect inspection")
+        PATCHCORE_CHECKPOINT_PATH: str = Field(default="models/patchcore/patchcore_bottle.ckpt", description="Path to PatchCore checkpoint")
+        PATCHCORE_METADATA_PATH: str = Field(default="models/patchcore/model_metadata.json", description="Path to PatchCore model metadata")
+        PATCHCORE_DEVICE: str = Field(default="cpu", description="Computing device for PatchCore inference ('cpu' or 'cuda')")
+        DECISION_THRESHOLD: Optional[float] = Field(
+            default=34.1442,
+            description="Calibrated anomaly score threshold for OK/NG decision (None = UNKNOWN)",
+        )
+
         model_config = SettingsConfigDict(
             env_file=str(PROJECT_ROOT / ".env"),
             env_file_encoding="utf-8",
@@ -97,6 +107,18 @@ try:
             """Return resolved absolute path to test_data/injected_images directory."""
             return self.absolute_test_data_path / "injected_images"
 
+        @property
+        def absolute_patchcore_checkpoint_path(self) -> Path:
+            """Return resolved absolute path to PatchCore model checkpoint."""
+            path = Path(self.PATCHCORE_CHECKPOINT_PATH)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_patchcore_metadata_path(self) -> Path:
+            """Return resolved absolute path to PatchCore model metadata JSON."""
+            path = Path(self.PATCHCORE_METADATA_PATH)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
         def ensure_directories(self) -> None:
             """Create required output, log, data, and test directories if they don't exist."""
             self.absolute_output_path.mkdir(parents=True, exist_ok=True)
@@ -105,6 +127,7 @@ try:
             self.absolute_inspections_path.parent.mkdir(parents=True, exist_ok=True)
             self.absolute_inspection_logs_path.parent.mkdir(parents=True, exist_ok=True)
             self.absolute_injected_images_path.mkdir(parents=True, exist_ok=True)
+            self.absolute_patchcore_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
 except ImportError:
     # Fallback when pydantic-settings is not yet installed
@@ -128,6 +151,12 @@ except ImportError:
             self.BRIGHTNESS_HIGH_THRESHOLD = float(os.getenv("BRIGHTNESS_HIGH_THRESHOLD", "150.0"))
             self.FAULT_INJECTION_FACTOR = float(os.getenv("FAULT_INJECTION_FACTOR", "0.6"))
             self.TEST_DATA_DIR = os.getenv("TEST_DATA_DIR", "test_data")
+            self.ENABLE_PATCHCORE = os.getenv("ENABLE_PATCHCORE", "true").lower() in ("1", "true", "yes")
+            self.PATCHCORE_CHECKPOINT_PATH = os.getenv("PATCHCORE_CHECKPOINT_PATH", "models/patchcore/patchcore_bottle.ckpt")
+            self.PATCHCORE_METADATA_PATH = os.getenv("PATCHCORE_METADATA_PATH", "models/patchcore/model_metadata.json")
+            self.PATCHCORE_DEVICE = os.getenv("PATCHCORE_DEVICE", "cpu")
+            thresh_env = os.getenv("DECISION_THRESHOLD", "34.1442")
+            self.DECISION_THRESHOLD = None if thresh_env.lower() in ("none", "null", "") else float(thresh_env)
 
         @property
         def absolute_dataset_path(self) -> Path:
@@ -167,6 +196,16 @@ except ImportError:
             path = Path(self.INSPECTION_LOGS_FILE)
             return path if path.is_absolute() else (PROJECT_ROOT / path)
 
+        @property
+        def absolute_patchcore_checkpoint_path(self) -> Path:
+            path = Path(self.PATCHCORE_CHECKPOINT_PATH)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+        @property
+        def absolute_patchcore_metadata_path(self) -> Path:
+            path = Path(self.PATCHCORE_METADATA_PATH)
+            return path if path.is_absolute() else (PROJECT_ROOT / path)
+
         def ensure_directories(self) -> None:
             self.absolute_output_path.mkdir(parents=True, exist_ok=True)
             self.absolute_injected_path.mkdir(parents=True, exist_ok=True)
@@ -175,6 +214,7 @@ except ImportError:
             self.absolute_log_path.mkdir(parents=True, exist_ok=True)
             self.absolute_inspections_path.parent.mkdir(parents=True, exist_ok=True)
             self.absolute_inspection_logs_path.parent.mkdir(parents=True, exist_ok=True)
+            self.absolute_patchcore_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 

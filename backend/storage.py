@@ -23,8 +23,12 @@ class EventCode:
     IMAGE_LOADED = "IMAGE_LOADED"
     IMAGE_LOAD_FAILED = "IMAGE_LOAD_FAILED"
     ANALYSIS_COMPLETED = "ANALYSIS_COMPLETED"
+    INFERENCE_STARTED = "INFERENCE_STARTED"
+    INFERENCE_COMPLETED = "INFERENCE_COMPLETED"
+    INFERENCE_FAILED = "INFERENCE_FAILED"
     INSPECTION_COMPLETED = "INSPECTION_COMPLETED"
     INSPECTION_FAILED = "INSPECTION_FAILED"
+    DECISION_MADE = "DECISION_MADE"
     BRIGHTNESS_LOW_WARNING = "BRIGHTNESS_LOW_WARNING"
     BRIGHTNESS_HIGH_WARNING = "BRIGHTNESS_HIGH_WARNING"
 
@@ -42,6 +46,7 @@ class InspectionStage:
     INIT = "init"
     LOAD = "load"
     ANALYZE = "analyze"
+    INFERENCE = "inference"
     DECISION = "decision"
     COMPLETE = "complete"
 
@@ -99,6 +104,30 @@ class InspectionRecord(BaseModel):
     status: str = Field(
         default="COMPLETED",
         description="Execution workflow status: COMPLETED | FAILED",
+    )
+    anomaly_score: Optional[float] = Field(
+        default=None,
+        description="PatchCore anomaly distance score (None if model disabled or uninspected)",
+    )
+    decision_threshold: Optional[float] = Field(
+        default=None,
+        description="Applied decision threshold (None if uncalibrated)",
+    )
+    inference_time_ms: Optional[float] = Field(
+        default=None,
+        description="PatchCore inference latency in milliseconds",
+    )
+    defect_detection_status: Optional[str] = Field(
+        default=None,
+        description="ML defect detection lifecycle status: COMPLETED | FAILED | SKIPPED | UNINSPECTED",
+    )
+    final_result: Optional[str] = Field(
+        default=None,
+        description="Comprehensive industrial verdict: OK | NG | REINSPECT | ERROR",
+    )
+    final_reason_code: Optional[str] = Field(
+        default=None,
+        description="Standardized root-cause reason code for final_result",
     )
 
 

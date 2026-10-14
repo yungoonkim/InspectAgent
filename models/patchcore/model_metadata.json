@@ -1,0 +1,94 @@
+{
+  "model_name": "PatchCore",
+  "category": "bottle",
+  "framework": "anomalib",
+  "anomalib_version": "2.7.0",
+  "torch_version": "2.6.0+cu124",
+  "backbone": "resnet18",
+  "layers": [
+    "layer2",
+    "layer3"
+  ],
+  "coreset_sampling_ratio": 0.05,
+  "train_image_count": 180,
+  "val_image_count": 29,
+  "dataset_split_file": "dataset_split.json",
+  "split_seed": 42,
+  "train_image_dir": "data/splits/train_good",
+  "image_size": [
+    256,
+    256
+  ],
+  "normalization": {
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  },
+  "training_device": "GPU (NVIDIA GeForce RTX 4060 Laptop GPU)",
+  "training_time_seconds": 33.93,
+  "peak_vram_mb": 715.6,
+  "checkpoint_file": "patchcore_bottle.ckpt",
+  "checkpoint_size_mb": 24.18,
+  "checkpoint_sha256": "4b239d28e72c63bf782cd1d31981d7f4362c591e7c23164e4c0ac8b5e99b52a3",
+  "memory_bank_shape": [
+    9216,
+    384
+  ],
+  "created_at": "2026-10-14 17:55:56",
+  "calibrated_threshold": 34.1442,
+  "calibration": {
+    "validation_sample_count": 29,
+    "model_version": "PatchCore-ResNet18-180Train",
+    "score_distribution": {
+      "mean": 31.0602,
+      "std": 1.028,
+      "min": 29.7076,
+      "max": 33.8527,
+      "p90": 32.6589,
+      "p95": 32.812,
+      "p99": 33.568,
+      "mu_plus_2sigma": 33.1162,
+      "mu_plus_3sigma": 34.1442
+    },
+    "candidate_thresholds": [
+      {
+        "name": "P95 Percentile",
+        "threshold": 32.812,
+        "policy": "Tolerates 5% false alarm in validation. Aggressive.",
+        "val_false_positives": 2
+      },
+      {
+        "name": "P99 Percentile",
+        "threshold": 33.568,
+        "policy": "Tolerates 1% false alarm (interpolated). Moderate.",
+        "val_false_positives": 1
+      },
+      {
+        "name": "Normal Maximum",
+        "threshold": 33.8527,
+        "policy": "Strict zero FP on validation set. Zero-margin boundary.",
+        "val_false_positives": 0
+      },
+      {
+        "name": "Mean + 3σ (Conservative MVP)",
+        "threshold": 34.1442,
+        "policy": "99.7% Gaussian confidence interval. Robust safety margin against normal noise.",
+        "val_false_positives": 0
+      }
+    ],
+    "selected_threshold": 34.1442,
+    "selection_rationale": "Conservative MVP zero-FP criterion: max(Max + 0.05, Mean + 3σ).",
+    "statistical_limitations": [
+      "Small sample size (N=29) limits empirical percentile estimation accuracy (P99 is interpolated between top 2 samples).",
+      "Normal distribution assumption for μ+3σ is an approximation; empirical distance distribution may exhibit mild skewness.",
+      "Threshold does not account for unseen factory lighting fluctuations; image quality warnings must supplement decision confidence."
+    ]
+  }
+}

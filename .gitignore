@@ -252,6 +252,7 @@ data/logs/**
 !data/logs/.gitkeep
 data/inspections.jsonl
 data/inspection_logs.jsonl
+data/splits/
 *.log
 
 # Test data generated injected images
@@ -259,4 +260,19 @@ test_data/injected_images/**
 !test_data/injected_images/
 !test_data/injected_images/.gitkeep
 
+# Machine Learning Models and Checkpoints
+models/**/*.ckpt
+models/**/*.pt
+models/**/*.bin
+models/**/*.onnx
+models/temp_test/
+!models/
+!models/**/
+!models/**/.gitkeep
 
+# Evaluation Ground Truth & Private Test Sets (AGENTS.md Rule 2, 9)
+evaluation_private/
+*evaluation_answers*.json
+*mask_pairs*.json
+ground_truth/
+**/ground_truth/**

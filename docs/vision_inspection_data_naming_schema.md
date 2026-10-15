@@ -99,6 +99,26 @@ project/
 | `metrics` | object | 선택 | 밝기 등 측정값 |
 | `source` | string | 선택 | `vision`, `api`, `test_injector` 등 |
 
+### 검사 ID(`inspection_id`) 1~5 예시 및 각 번호의 세부 의미
+
+`inspection_id`는 검사가 실행될 때마다 발급되는 **고유 실행 식별자**이며, 기본 포맷은 `INSP-{6자리 일련번호}`(예: `INSP-000001` ~ `INSP-000005`)입니다.
+
+* **접두사 (`INSP-`)**: 시스템 내에서 '검사(Inspection)' 이벤트임을 나타내는 네임스페이스입니다.
+* **숫자 (`000001` ~ `000005`)**: 검사 요청이 들어온 순서대로 1씩 증가(Auto-Increment)하는 **검사 실행 순번(Sequence)**입니다. 제품이 같더라도 재검사할 때마다 새로운 번호가 발급됩니다.
+
+아래는 검사 ID 1번부터 5번까지 각각의 숫자가 어떤 검사 상황을 의미하는지 나타낸 구체적인 예시입니다:
+
+| 검사 ID | 제품 번호 (`product_id`) | 결과 (`result`) | 상황 및 숫자가 의미하는 세부 설명 | 연결되는 주요 이벤트 로그 예시 |
+|---|---|---|---|---|
+| **`INSP-000001` (1번)** | `ABCD1541` | `NG` | **1회차 최초 검사 (이상 감지)**<br>제품 `ABCD1541`에 대한 첫 번째 검사 실행입니다. 조명 밝기가 기준치보다 낮아 경고가 발생했고 이상 점수가 임계값을 초과하여 불량(`NG`)으로 판정되었습니다. | `INSPECTION_STARTED`<br>`BRIGHTNESS_LOW`<br>`INSPECTION_COMPLETED(NG)` |
+| **`INSP-000002` (2번)** | `ABCD1541` | `OK` | **동일 제품 재검사 (정상 판정)**<br>1번 검사에서 불량 판정을 받은 동일 제품(`ABCD1541`)을 조명 환경 개선 후 다시 검사한 실행입니다. **제품은 같지만 검사 실행 단위가 다르므로 숫자 2가 새로 부여**되며, 기존 1번 기록을 덮어쓰지 않고 양품(`OK`)으로 통과했습니다. | `INSPECTION_STARTED`<br>`IMAGE_LOADED`<br>`INSPECTION_COMPLETED(OK)` |
+| **`INSP-000003` (3번)** | `ABCD1542` | `OK` | **신규 제품 일반 검사 (정상 통과)**<br>새로운 제품 `ABCD1542`에 대한 3번째 검사 실행입니다. 영상 품질과 외관 모두 정상 기준으로 이상 점수가 낮아 양품(`OK`)으로 판정되었습니다. | `INSPECTION_STARTED`<br>`IMAGE_LOADED`<br>`INSPECTION_COMPLETED(OK)` |
+| **`INSP-000004` (4번)** | `ABCD1543` | `NG` | **신규 제품 결함 검출 (실제 불량)**<br>또 다른 제품 `ABCD1543`에 대한 4번째 검사 실행입니다. 병 입구 파손(`broken_large`) 또는 오염이 감지되어 비전 모델의 이상 점수가 기준치를 크게 초과해 결함(`NG`)으로 확정되었습니다. | `INSPECTION_STARTED`<br>`ANOMALY_DETECTED`<br>`INSPECTION_COMPLETED(NG)` |
+| **`INSP-000005` (5번)** | `ABCD1544` | `ERROR` | **시스템/장치 에러 (검사 실패)**<br>5번째 검사 실행 중 카메라 통신 두절, 미등록 이미지 ID 전달, 또는 파일 로드 실패 등의 시스템 예외가 발생하여 판정 자체를 완료하지 못하고 중단(`ERROR`)된 케이스입니다. (제품 불량 `NG`와 구분) | `INSPECTION_STARTED`<br>`IMAGE_LOAD_FAILED`<br>`INSPECTION_FAILED(ERROR)` |
+
+> **로그 연결의 의미:**  
+> `inspection_logs.jsonl` 파일에서는 위 각 검사 ID(`INSP-000001` ~ `INSP-000005`)가 외래키(Foreign Key) 역할을 합니다. 즉, 하나의 `INSP-000001`에 시작, 영상 로드, 밝기 경고, 검사 완료 등 여러 줄의 세부 이벤트 로그가 한 묶음으로 연결되어 전체 검사 라이프사이클을 추적할 수 있습니다.
+
 ### 예시 (`inspection_logs.jsonl`)
 
 ```jsonl

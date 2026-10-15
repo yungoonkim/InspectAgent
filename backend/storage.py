@@ -318,6 +318,7 @@ class JsonlInspectionStorage(InspectionStorageBase):
             try:
                 data = json.loads(line_str)
                 if data.get("inspection_id") == inspection_id:
+                    data.setdefault("timestamp", "")
                     return InspectionRecord.model_validate(data)
             except (json.JSONDecodeError, ValidationError):
                 # Skip corrupted lines gracefully
@@ -346,6 +347,7 @@ class JsonlInspectionStorage(InspectionStorageBase):
             try:
                 data = json.loads(line_str)
                 if data.get("inspection_id") == inspection_id:
+                    data.setdefault("timestamp", "")
                     matched_logs.append(InspectionLogRecord.model_validate(data))
             except (json.JSONDecodeError, ValidationError):
                 continue
@@ -373,6 +375,7 @@ class JsonlInspectionStorage(InspectionStorageBase):
             try:
                 data = json.loads(line_str)
                 if product_id is None or data.get("product_id") == product_id:
+                    data.setdefault("timestamp", "")
                     results.append(InspectionRecord.model_validate(data))
                     if len(results) >= limit:
                         break

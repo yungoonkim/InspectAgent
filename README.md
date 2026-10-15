@@ -5,14 +5,14 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.6.0-EE4C2C.svg)](https://pytorch.org/)
 [![Anomalib](https://img.shields.io/badge/Anomalib-PatchCore-orange.svg)](https://github.com/openvinotoolkit/anomalib)
-[![Tests](https://img.shields.io/badge/pytest-105%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/pytest-536%20passed-brightgreen.svg)]()
 
 ---
 
 ## 1. 프로젝트 개요
 
 **VisionInsight**는 산업용 제조 라인의 병(Bottle) 비전 검사 시스템에서 발생하는 이상 상황을 다각도로 진단하는 AI 시스템입니다.  
-OpenCV 기반의 영상 품질 분석과 PatchCore 비지도 이상 탐지(Anomaly Detection) 모델을 결합하여 제품 결함과 촬영 환경 이상을 독립적으로 감지하며, 산업용 안전 원칙에 따른 종합 판정(`final_result`)을 도출합니다. 향후 **Gemini AI Agent**가 검사 결과와 라이프사이클 이벤트 로그를 스스로 조사하여 이상 원인과 대처 방안을 근거 중심으로 설명하는 진단 보고서를 생성하도록 설계되었습니다.
+OpenCV 기반의 영상 품질 분석과 PatchCore 비지도 이상 탐지(Anomaly Detection) 모델을 결합하여 제품 결함과 촬영 환경 이상을 독립적으로 감지하며, 산업용 안전 원칙에 따른 종합 판정(`final_result`)을 도출합니다. **Gemini AI Agent**가 검사 결과와 라이프사이클 이벤트 로그를 도구로 자율 조사하여 이상 원인과 대처 방안을 근거 중심으로 설명하는 진단 보고서를 생성합니다.
 
 ### 핵심 특징
 - **제품 결함과 영상 품질의 완전한 분리:** 영상 품질 저하(조도 저하 등)와 제품 결함(파손, 오염 등)을 독립적으로 평가하여 불필요한 결함 오진단을 방지합니다.
@@ -20,9 +20,10 @@ OpenCV 기반의 영상 품질 분석과 PatchCore 비지도 이상 탐지(Anoma
 - **산업용 종합 판정 체계:** 제품 판정(`result`), 영상 품질(`image_quality_status`), 추론 상태(`defect_detection_status`)를 결합하여 `OK`, `NG`, `REINSPECT`(재검), `ERROR`(오류)의 4단계 종합 판정을 제공합니다.
 - **완전한 감사 추적성 (Audit Trail):** 검사 시작부터 전처리, 추론, 판정, 저장에 이르는 전 과정을 구조화된 JSONL 이벤트 로그로 자동 영구화합니다.
 - **평가 정답 및 민감 정보의 엄격한 격리:** 중립적인 이미지 식별자(`IMG-BOTTLE-XXXX`)를 적용하고 내부 절대 경로와 정답 라벨을 완벽히 은닉합니다.
+- **결정적 근거 기반 AI 진단 (Grounding):** Gemini Agent가 추측으로 진단하지 않고, 실제 서버 도구 실행 Trace 및 Evidence ID / JSON Pointer를 통해서만 관측 사실을 입증하도록 강제합니다.
 
 ### 마일스톤 현황
-- **현재 구현 완료 (Day 1 ~ Day 3.5):**
+- **Day 1 ~ Day 3.5 완료:**
   - FastAPI 기반 비전 검사 파이프라인 및 고유 ID 발급 시스템
   - OpenCV 영상 밝기 지표 계산 및 품질 분석
   - 180장 정상 이미지 학습 ResNet-18 PatchCore 모델 구축 및 CPU 추론 엔진
@@ -30,11 +31,24 @@ OpenCV 기반의 영상 품질 분석과 PatchCore 비지도 이상 탐지(Anoma
   - 산업용 종합 판정(`final_result`, `final_reason_code`) 비즈니스 로직
   - T01(정상), T03(조도 저하), T05(로드 실패), T06(미검출 불량) 4대 시나리오 실측 검증
   - Cloud Run CPU 배포를 위한 경량 Dockerfile 및 운영 의존성 분리
-  - 전체 105개 단위/통합 회귀 테스트 100% 통과
-- **향후 구현 예정 (Day 4 ~ Day 7):**
-  - **Day 4:** Gemini Function Calling 기반 AI Agent 도구 및 이상 진단 보고서 생성
+- **Day 4 진행 현황 (Step 1~3 구현 완료, Step 4 실서버 검증 진행 중 — 미완료):**
+  - **Step 1 구현 완료:** `InspectionTools` 4개 구현 및 단위 검증 완료 (`get_inspection_result`, `get_execution_logs`, `analyze_image_quality`, `get_inspection_history`).
+  - **Step 2 구현 완료:** `AgentService` 오케스트레이션, Gemini 수동 Function Calling 바인딩, Evidence ID 및 JSON Pointer 결정적 근거 검증, 판정 보호 정책, 정상 검사 조건부 조기 종료 완료.
+  - **Step 3 구현 완료:** FastAPI `POST /analyze/{inspection_id}` 사후 분석 엔드포인트 구현 및 Mock 기반 회귀 검증 완료 ([API 문서](docs/day4-step3-api.md) 참조).
+  - **Step 4 실서버 Gemini API 검증 (진행 중 / 미완료):**
+    - 1차: Function Calling 성공, 2차 후속 요청 시 SDK의 `role="tool"` 직렬화로 HTTP 400 발생 -> `role="user"`로 프로토콜 교정.
+    - 2차: Gemini 서버 504 DEADLINE_EXCEEDED (다중 라운드 종료 확인) 발생 -> 정상 검사 조건부 조기 종료(2요청 경로) 적용.
+    - 3차: 조기 종료 후 최종 구조화 응답(`DiagnosisDraft`) 요청에서 복잡한 스키마 제약으로 HTTP 400 발생.
+    - 스키마 후보 실서버 격리 실험:
+      - **A/B/C 스키마 실서버 PASS:** 단순 문자열/인라인 구조는 HTTP 200 수락.
+      - **D/E2 스키마 실서버 FAIL:** `$defs/$ref`, Union, Enum, 배열 제약 결합 시 HTTP 400 거부.
+      - **단순 JSON + Python 엄격 검증 프로토타입 실서버 PASS:** 전송 스키마를 단순화(454B)하고 서버 Python에서 결정적 근거/Pydantic을 검증하는 대안이 합성 실험에서 HTTP 200 및 검증 100% 통과 ([검증 기록](docs/day4-step4-gemini-validation.md) 참조).
+    - **Step 4 미완료 항목:** 단순 JSON 방식의 운영 AgentService 연결, T01 전체 End-to-End 분석 성공, T03/T05/T06 실제 Gemini 분석, 최종 진단 품질 검증.
+- **향후 구현 예정 (Day 4 Step 5 ~ Day 7):**
+  - **Day 4 Step 5:** 단순 JSON 진단 운영 연결 및 T01/T03/T05/T06 E2E 검증 완료
+  - **신규 영상 검사 확장:** 컨베이어 동영상 Live View, 프레임 Grab, ROI 선택 기반 PatchCore 및 Gemini 재진단
   - **Day 5:** 상황별 추가 조사, 반례 평가 및 가설 검증
-  - **Day 6:** React/TypeScript 기반 검사 관제 웹 대시보드 구축
+  - **Day 6:** React/TypeScript 기반 검사 관제 웹 대시보드 구축 (Live View & Grab View 포함)
   - **Day 7:** Google Cloud Run 컨테이너 배포 및 영구 저장소(Cloud Storage) 전환
 
 ---
@@ -51,7 +65,9 @@ flowchart TD
     Decision["Comprehensive Decision<br>(backend/decision.py)"]
     Storage["JSONL Storage Engine<br>(inspections.jsonl & logs.jsonl)"]
     Response["HTTP 201 Response<br>(InspectionResponse)"]
-    Agent["[Day 4] Gemini AI Agent<br>(Function Calling & Diagnosis)"]
+    AgentClient["Client / Diagnosis Trigger<br>(POST /analyze/{inspection_id})"]
+    Agent["Gemini AI Agent Service<br>(backend/agent/service.py)"]
+    Tools["InspectionTools (4 Tools)<br>(backend/agent/tools.py)"]
 
     Client -->|image_id: IMG-BOTTLE-0001| Registry
     Registry --> Loader
@@ -61,7 +77,11 @@ flowchart TD
     PatchCore -->|anomaly_score & result| Decision
     Decision -->|final_result & final_reason_code| Storage
     Storage --> Response
-    Response -.->|검사 결과/이벤트 로그 조회| Agent
+
+    AgentClient -->|inspection_id| Agent
+    Agent -->|Function Calling| Tools
+    Tools -->|살균 데이터 읽기| Storage
+    Agent -->|사후 진단 보고서 반환| AgentClient
 ```
 
 ---
@@ -219,14 +239,69 @@ curl -X POST http://localhost:8000/inspections \
 }
 ```
 
-#### 4) 대화형 API 문서 (Swagger UI)
+#### 4) 검사 사후 이상 진단 요청 (`POST /analyze/{inspection_id}`)
+```bash
+curl -X POST http://localhost:8000/analyze/INSP-000001
+```
+**응답 예시 (HTTP 200 OK / Mock 또는 Agent 성공 시):**
+```json
+{
+  "analysis_id": "ANALYSIS-8ba058a5a9554a468bd074e4719557c7",
+  "inspection_id": "INSP-000001",
+  "analysis_status": "COMPLETED",
+  "error_code": null,
+  "inspection_result": "OK",
+  "final_result": "OK",
+  "final_reason_code": "ALL_CHECKS_PASSED",
+  "overall_summary": "기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지 않습니다.",
+  "observed_facts": [
+    {
+      "fact_id": "F0001",
+      "evidence_id": "E0001",
+      "source_tool": "get_inspection_result",
+      "source_field": "/data/status",
+      "source_event": null,
+      "observed_value": "COMPLETED"
+    }
+  ],
+  "possible_causes": [],
+  "recommended_checks": [],
+  "limitations": ["현재 진단은 단일 검사 기록 기반이며 현장 물리 점검을 대체하지 않습니다."],
+  "tools_used": ["get_inspection_result"],
+  "tool_execution_trace": [
+    {
+      "sequence": 1,
+      "round_number": 1,
+      "tool_name": "get_inspection_result",
+      "arguments": {"inspection_id": "INSP-000001"},
+      "executed": true,
+      "success": true,
+      "error_code": null,
+      "elapsed_ms": 2.945,
+      "evidence_id": "E0001"
+    }
+  ],
+  "model_name": "gemini-3.8-flash",
+  "model_availability": "NOT_TESTED",
+  "timestamp": "2026-10-15T01:52:42.500094+00:00"
+}
+```
+
+#### 5) 대화형 API 문서 (Swagger UI)
 - 브라우저에서 `http://localhost:8000/docs` 접속
 
-### 8.4 전체 회귀 테스트 실행
+### 8.4 테스트 실행 및 검증 결과
+
 ```bash
-python -m pytest tests -v
-# 결과: 105 passed (100% 통과)
+# 전체 테스트 스위트 오프라인 회귀 실행 (네트워크 차단 격리 환경)
+python -m pytest tests -q -p no:cacheprovider
+# 마지막 전체 실행 결과: 536 passed, 3 warnings in 19.14s (100% 통과)
 ```
+
+> **테스트 결과 구분 안내:**
+> - **마지막 전체 회귀 실행 (전체 pytest):** **536 passed, 0 failed, 0 skipped** (Day 1~3 비전/검사 파이프라인 + Day 4 Step 1~3 Agent 도구/서비스/API + 스키마 분할 및 단순 보고서 프로토타입 50개 포함).
+> - **후속 개별 테스트 실행:** 단순 JSON 보고서 실서버 검증 전 관련 테스트(`test_agent_e2_partitions.py`, `test_agent_simple_report.py`) 50개 통과. 모든 후속 개별 실험 시 전체 536개를 매번 재실행한 것은 아닙니다.
+> - **주의:** 오프라인 테스트의 PASS는 Mock 대역 및 로컬 SDK 직렬화 성공이며, 실제 Gemini 서버에서의 최종 진단 품질 성공을 의미하지 않습니다.
 
 ---
 
@@ -242,7 +317,30 @@ python -m pytest tests -v
 
 ---
 
-## 10. 다음 단계 안내
+## 10. 다음 단계 안내 및 인수인계 계획
 
-- **Day 4:** Gemini AI Agent 연동 및 Function Calling 구현 ([docs/day4-agent-handoff.md](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/docs/day4-agent-handoff.md) 참조)
-- **규정 준수:** 모든 Git 커밋 및 외부 클라우드 리소스 생성은 사용자의 사전 확인 및 승인 하에 진행됩니다.
+### 10.1 Day 4 완료를 위한 잔여 작업 순서 (인수인계 가이드)
+1. **단순 JSON 보고서 프로토타입의 운영 AgentService 연결:**  
+   합성 실험에서 실서버 수락이 검증된 `scripts/agent_simple_report_prototype.py`의 출력 스키마(454B) 및 토큰 카탈로그 변환기를 운영 `backend/agent/service.py` 최종 응답 생성 경계에 연결.
+2. **Pydantic 및 결정적 Evidence 검증 회귀 테스트:**  
+   변환된 `DiagnosisDraft`의 6대 핵심 사실, JSON Pointer 일치, 가설/권고 근거 조건 불변성 오프라인 검증.
+3. **전체 pytest 회귀 실행:**  
+   전체 536개+ 회귀 테스트 스위트 실행 및 무결성 확인.
+4. **별도 승인 후 T01 실제 Gemini End-to-End 분석:**  
+   `POST /analyze/INSP-001396` 1회 실행하여 실제 Gemini 호출 → 도구 실행 → 단순 JSON 생성 → Python 검증 → HTTP 200 반환 전체 흐름 검증.
+5. **별도 승인 후 T03 / T05 / T06 실제 Gemini 분석 검증:**  
+   조도 저하(T03), 로드 실패(T05), 미검출 불량(T06)에 대한 실제 이상 진단 및 보고서 품질 검증.
+6. **Day 4 완료 판단 후 신규 영상 검사 기능 개발 진행.**
+
+### 10.2 신규 영상 검사 요구사항 (향후 개발 로드맵)
+Day 4 완료 후 VisionInsight는 정적 단일 이미지 검사에서 **동영상 기반 실시간 검사 관제 시스템**으로 확장될 예정입니다:
+- **컨베이어 Live View 동영상 연동:** MVTec Bottle 이미지들로 합성한 컨베이어 벨트 주행 동영상을 `data/outputs/videos`에서 로드하여 웹 화면에 스트리밍.
+- **실시간 프레임 Grab:** 동영상 재생 중 특정 시점의 프레임을 캡처(Grab)하여 정지 이미지 생성.
+- **마우스 드래그 ROI(Region of Interest) 선택:** 웹 UI에서 마우스 드래그로 검사할 병 영역(ROI)을 지정.
+- **ROI 이미지 대상 기존 PatchCore 추론 적용:** 드래그로 추출된 관심 영역 이미지에 대해 기존 훈련된 ResNet-18 PatchCore 엔진 및 임계값(34.1442)을 동일하게 적용하여 실시간 결함 판정.
+- **품질 경고 및 검사 실패 시 Gemini Agent 자율 재진단:** 조명 이상(`WARNING_LOW_BRIGHTNESS`) 또는 검사 실패(`ERROR`) 발생 시 Gemini Agent가 자동으로 호출되어 원인 및 점검 가이드 제시.
+- **실행 로그 데이터 정제:** 검사 라이프사이클 이벤트 로그에서 불필요하거나 가상인 `product_id`를 제외하고 정제된 감사 로그 유지.
+- **React 관제 화면 구현:** Live View 플레이어와 Grab Image View, ROI 선택 도구, Agent 진단 패널을 통합한 React 대시보드 구축 (Day 6).
+
+> **주의:** 기존 훈련된 PatchCore 체크포인트(`models/patchcore/patchcore_bottle.ckpt`)와 결정 임계값(`34.1442`)은 그대로 유지됩니다.  
+> 실제 Gemini API 호출 및 유료 모델 요청은 사용자의 사전 확인 및 명시적 승인 하에서만 1회씩 진행됩니다.

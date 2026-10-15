@@ -1,5 +1,11 @@
 # Vision 검사 데이터 스키마 및 식별자 명세 (`docs/inspection-data-schema.md`)
 
+> Day 4 Step 3 추가 API: `POST /analyze/{inspection_id}`. AnalysisResponse는 DiagnosisResult를
+> 재사용하고 analysis_id, inspection_result, final_result, final_reason_code, UTC timestamp를 추가합니다.
+> 판정 필드는 저장 기록에서 가져오며 구형 기록의 누락 필드는 null입니다.
+> 오류는 `{"detail":{"analysis_status":"FAILED","error_code":"..."}}` 형식입니다.
+> 요청·응답 예시, HTTP 상태 및 생명주기는 [Step 3 API 문서](day4-step3-api.md)를 참조하세요.
+
 > **프로젝트:** VisionInsight — MVTec AD Bottle 기반 Vision 검사 이상 진단 AI Agent  
 > **문서 버전:** 1.0.0 (Day 1 완료 기준)  
 > **상태:** 활성 (Active)
@@ -96,4 +102,150 @@ InspectAgent/
 │   ├── logs/                     # 실행 및 이벤트 로그 (.gitignore)
 │   ├── inspections.jsonl         # (Day 2 예정) 검사 실행 레코드
 │   └── inspection_logs.jsonl     # (Day 2 예정) 이벤트 로그 레코드
+```
+
+## 6. Day 4 Step 1: Agent 조회 도구 계약
+
+`backend.agent.InspectionTools(storage: InspectionStorageBase)`에 저장소를 주입합니다.
+도구는 검사 실행, 이미지 로드, 추론, 파일 쓰기를 수행하지 않습니다.
+Day 4 Step 2의 진단 초안·최종 결과·Trace·근거 검증 계약은
+[day4-step2-agent.md](day4-step2-agent.md)에 정의하며 구현 모델은 `backend/agent/schemas.py`입니다.
+아래 계약은 Agent 조회 도구에 적용하며 위의 Day 1 API 예시를 변경하지 않습니다.
+
+| 메서드 | 저장소 호출 | 반환 data |
+|---|---|---|
+| `get_inspection_result(inspection_id: str)` | `get_inspection(inspection_id)` | 허용된 검사 레코드 객체 |
+| `get_execution_logs(inspection_id: str)` | `get_inspection`, `get_logs` | 허용된 이벤트 객체 목록 |
+| `analyze_image_quality(inspection_id: str)` | `get_inspection` | 저장된 품질 상태·밝기·크기·기준치 기록 여부 |
+| `get_inspection_history(product_id: str, limit: int = 5)` | `list_inspections(limit=1000, product_id=product_id)` | 동일 제품의 허용된 검사 레코드 목록 |
+
+모든 반환값은 JSON 직렬화 가능한 다음 구조입니다.
+
+```json
+{"ok": false, "error": "NOT_FOUND", "data": null, "metadata": {}}
+```
+
+- `ok`: 도구 조회의 성공 여부이며 검사 프로그램의 `status`와 독립적입니다.
+- `error`: 성공 시 null. `INVALID_ARGUMENT`, `NOT_FOUND`, `STORAGE_ERROR`, `DATA_UNAVAILABLE`만 반환하며 예외 메시지는 제외합니다.
+- `DATA_UNAVAILABLE`: 검사 존재 확인 후 로그가 없거나, 제품 이력이 없거나, 조회 레코드의 검사 ID가 일치하지 않는 경우입니다. 로그 부재는 `data=[]`, `metadata.inspection_exists=true`로 표시합니다.
+- 검사 ID는 `INSP-`와 6~12자리 숫자, 제품 ID는 ASCII 영숫자로 시작하는 영숫자·`_`·`-` 1~64자로 제한합니다. 경로, 공백, 제어 문자, 알려진 평가 클래스 문자열은 거부합니다.
+- `limit`는 bool을 제외한 정수 1~20이며 기본값은 5입니다.
+
+검사 반환 필드는 `inspection_id`, `product_id`, 중립 `image_id`, `timestamp`,
+`timestamp_status`, `status`, `result`, `image_quality_status`, `defect_detection_status`,
+`final_result`, `final_reason_code`, `anomaly_score`, `decision_threshold`,
+`inference_time_ms`, `decision_confidence`, `model_version`, `metrics`입니다.
+`metrics`는 `mean`, `std`, `min`, `max`, `width`, `height`, `channels`만 포함합니다.
+`decision_confidence`와 `model_version`은 저장된 metrics에서 허용된 열거값만 추출합니다.
+현재 허용 모델명은 `PatchCore`, `PatchCore-ResNet18-180Train`, `patchcore_bottle_v1_180`입니다.
+새 모델명은 명시적으로 허용 목록에 등록해야 합니다.
+
+로그는 시각·시각 유효성·수준·단계·이벤트 코드와 허용 지표만 반환합니다.
+자유 문자열인 `message`, `source`, 파일명, 에러 문자열, 원본 metrics는 반환하지 않습니다.
+로그 metrics의 허용 범위는 밝기·크기·모델 점수·임계값·추론 시간과 판정 관련 열거값입니다.
+임의 문자열, bool형 수치, 음수, NaN/Infinity는 null로 처리합니다.
+밝기 통계는 0~255, 크기는 양의 정수 100000 이하로 제한합니다.
+누락·미허용 필드는 null이며 기존 판정은 다시 계산하지 않습니다.
+
+타임스탬프는 시간대가 있는 ISO 8601 값만 인정하고 UTC로 정규화합니다.
+로그는 유효 시각 오름차순, 이력은 내림차순으로 안정 정렬합니다.
+동일 시각의 순서는 저장소 반환 순서를 유지합니다.
+잘못된 시각·시간대 없는 시각·누락 시각은 null과 `INVALID_OR_MISSING`으로 표시하고
+유효 시각 뒤에 저장소 반환 순서대로 배치합니다. 실제 발생 순서를 추정하지 않습니다.
+JSONL 조회부는 누락 시각을 빈 문자열로 읽어 Pydantic의 현재 시각 기본값 생성을 방지합니다.
+쓰기 동작이나 기존 파일은 변경하지 않습니다.
+
+이력은 저장소가 반환한 최대 1000개 후보 안에서 정렬하고 그 뒤 limit를 적용합니다.
+`ordering_scope=RETURNED_STORAGE_CANDIDATES`, `global_latest_guaranteed=false`이며,
+`scan_limit_reached`는 조회 상한 도달 여부입니다. 상한 밖에 더 최신 시각이 있을 수 있습니다.
+`candidate_count`, `invalid_timestamp_count`도 반환합니다.
+현재 저장소의 손상 행 건너뛰기 정책 때문에 원본 전체의 완전성은 보장할 수 없습니다.
+
+영상 품질 도구는 저장된 `metrics.applied_thresholds.low_threshold/high_threshold`가
+유효한 숫자 쌍(0 ≤ low ≤ high ≤ 255)이면 해당 두 값만 반환하고 `RECORDED`로 표시합니다.
+없으면 `brightness_thresholds=null`, `threshold_status=NOT_RECORDED`입니다.
+현재 설정을 과거 검사 기준치로 사용하지 않습니다. `physical_cause_confirmed=false`이며
+합성 주입 정보나 제품의 실제 평가 정답은 제공하지 않습니다.
+
+### 6.1 실제 도구 실행 예시 (가짜 저장소)
+
+다음은 `tests/test_agent_tools.py`의 `make_record()`와 `make_log()`를 반환하는
+가짜 저장소를 주입하여 실행한 응답입니다. 운영 검사 실행이나 실측 로그를 뜻하지 않습니다.
+
+`get_inspection_result("INSP-000001")`:
+
+```json
+{
+  "ok": true, "error": null,
+  "data": {
+    "inspection_id": "INSP-000001", "product_id": "PROD-001", "image_id": "IMG-BOTTLE-0001",
+    "timestamp": "2026-10-15T01:00:00+00:00", "timestamp_status": "VALID",
+    "status": "COMPLETED", "result": "OK", "image_quality_status": "NORMAL",
+    "defect_detection_status": "COMPLETED", "final_result": "OK", "final_reason_code": "ALL_CHECKS_PASSED",
+    "anomaly_score": 32.2679, "decision_threshold": 34.1442, "inference_time_ms": null,
+    "decision_confidence": "HIGH", "model_version": "PatchCore",
+    "metrics": {"mean": 138.37, "std": 92.08, "min": 0, "max": 255, "width": 900, "height": 900, "channels": 3}
+  },
+  "metadata": {}
+}
+```
+
+`get_execution_logs("INSP-000001")`:
+
+```json
+{
+  "ok": true, "error": null,
+  "data": [{
+    "timestamp": "2026-10-15T01:00:00+00:00", "timestamp_status": "VALID",
+    "level": "INFO", "stage": "load", "event_code": "IMAGE_LOADED",
+    "metrics": {
+      "anomaly_score": null, "decision_threshold": null, "inference_time_ms": null,
+      "max": null, "mean": null, "min": null, "std": null,
+      "channels": null, "height": null, "width": 900,
+      "decision_confidence": null, "model_version": null, "defect_detection_status": null,
+      "image_quality_status": null, "final_result": null, "final_reason_code": null, "result": null
+    }
+  }],
+  "metadata": {
+    "inspection_exists": true, "ordering": "TIMESTAMP_ASC_INVALID_LAST_STABLE",
+    "invalid_timestamp_count": 0, "messages_included": false
+  }
+}
+```
+
+`analyze_image_quality("INSP-000001")`:
+
+```json
+{
+  "ok": true, "error": null,
+  "data": {
+    "inspection_id": "INSP-000001", "image_quality_status": "NORMAL",
+    "metrics": {"mean": 138.37, "std": 92.08, "min": 0, "max": 255, "width": 900, "height": 900, "channels": 3},
+    "brightness_thresholds": null, "threshold_status": "NOT_RECORDED"
+  },
+  "metadata": {"measurement_source": "STORED_RECORD", "physical_cause_confirmed": false}
+}
+```
+
+`get_inspection_history("PROD-001")`:
+
+```json
+{
+  "ok": true, "error": null,
+  "data": [{
+    "inspection_id": "INSP-000001", "product_id": "PROD-001", "image_id": "IMG-BOTTLE-0001",
+    "timestamp": "2026-10-15T01:00:00+00:00", "timestamp_status": "VALID",
+    "status": "COMPLETED", "result": "OK", "image_quality_status": "NORMAL",
+    "defect_detection_status": "COMPLETED", "final_result": "OK", "final_reason_code": "ALL_CHECKS_PASSED",
+    "anomaly_score": 32.2679, "decision_threshold": 34.1442, "inference_time_ms": null,
+    "decision_confidence": "HIGH", "model_version": "PatchCore",
+    "metrics": {"mean": 138.37, "std": 92.08, "min": 0, "max": 255, "width": 900, "height": 900, "channels": 3}
+  }],
+  "metadata": {
+    "ordering": "TIMESTAMP_DESC_INVALID_LAST_STABLE", "scan_limit": 1000,
+    "candidate_count": 1, "scan_limit_reached": false,
+    "ordering_scope": "RETURNED_STORAGE_CANDIDATES", "global_latest_guaranteed": false,
+    "invalid_timestamp_count": 0
+  }
+}
 ```

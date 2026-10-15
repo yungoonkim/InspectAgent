@@ -29,6 +29,7 @@ from backend.inspection import (
 )
 from backend.storage import StorageError, get_inspection_storage
 from backend.ml.patchcore_inferencer import get_patchcore_inferencer
+from backend.agent.api import AgentRuntime, router as agent_router
 
 settings = get_settings()
 
@@ -41,12 +42,16 @@ async def lifespan(app: FastAPI):
     avoiding per-request model loading overhead.
     """
     current_settings = get_settings()
+    app.state.agent_runtime = AgentRuntime()
     if getattr(current_settings, "ENABLE_PATCHCORE", True):
         try:
             get_patchcore_inferencer()
         except Exception:
             pass  # Warning/error logged internally
-    yield
+    try:
+        yield
+    finally:
+        await app.state.agent_runtime.aclose()
 
 
 app = FastAPI(
@@ -55,6 +60,7 @@ app = FastAPI(
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
+app.include_router(agent_router)
 
 # CORS middleware for development and deployment
 app.add_middleware(

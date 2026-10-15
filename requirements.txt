@@ -10,6 +10,7 @@ numpy>=1.26.0
 # Configuration & Environment
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
+google-genai==2.31.0
 
 # Testing & Client
 pytest>=8.0.0

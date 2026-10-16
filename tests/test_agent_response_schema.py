@@ -14,7 +14,8 @@ from backend.agent.schemas import (
     DiagnosisDraft, ObservedFact, _project_response_json_schema, diagnosis_response_json_schema,
 )
 from backend.storage import InspectionStorageBase
-from tests.test_agent_service import call_response, normal_responses, report_payload, service_for
+from tests.test_agent_service import call_response, normal_responses, report_payload, service_for, wire_transport
+from backend.agent.reporting import simple_output_schema
 from tests.test_agent_tools import make_record
 
 
@@ -167,7 +168,7 @@ def test_projected_schema_does_not_bypass_trace_or_evidence_checks(storage, muta
         payload["observed_facts"].append(copy.deepcopy(payload["observed_facts"][0]))
     service, generator = service_for(storage, normal_responses(payload))
     result = asyncio.run(service.analyze("INSP-000001"))
-    assert result.error_code == "EVIDENCE_MISMATCH"
+    assert result.error_code == ("RESPONSE_SCHEMA_INVALID" if mutation == "duplicate_fact" else "EVIDENCE_MISMATCH")
     assert generator.await_count == 2
     assert result.observed_facts == []
     assert result.tool_execution_trace[0].evidence_id == "E0001"
@@ -177,17 +178,7 @@ def test_projected_schema_does_not_bypass_trace_or_evidence_checks(storage, muta
 def test_sdk_transport_serializes_schema_and_keeps_fast_path_and_evidence(storage):
     responses = normal_responses()
     responses[0] = call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}), signature=b"offline-only-signature")
-    wire_responses = []
-    for response in responses:
-        body = response.model_dump(mode="json", exclude_none=True)
-        candidate = body["candidates"][0]
-        candidate["finishReason"] = candidate.pop("finish_reason")
-        for part in candidate["content"]["parts"]:
-            for source, target in (("function_call", "functionCall"), ("thought_signature", "thoughtSignature")):
-                if source in part:
-                    part[target] = part.pop(source)
-        wire_responses.append(SimpleNamespace(body=json.dumps(body), headers={}))
-    transport = AsyncMock(side_effect=wire_responses)
+    transport = wire_transport(responses)
     api_client = SimpleNamespace(vertexai=False, async_request=transport, _verify_response=Mock())
     service, generator = service_for(storage, [])
     service.client = SimpleNamespace(aio=SimpleNamespace(models=sdk_models.AsyncModels(api_client)))
@@ -195,12 +186,12 @@ def test_sdk_transport_serializes_schema_and_keeps_fast_path_and_evidence(storag
     assert result.analysis_status == "COMPLETED"
     assert transport.await_count == 2
     final = transport.call_args_list[1].args[2]
-    assert final["generationConfig"]["responseJsonSchema"] == diagnosis_response_json_schema()
+    assert final["generationConfig"]["responseJsonSchema"] == simple_output_schema()
     assert "responseSchema" not in final["generationConfig"]
     assert "tools" not in final
     assert [content["role"] for content in final["contents"]] == ["user"]
     envelope = json.loads(final["contents"][0]["parts"][0]["text"])
-    assert envelope["evidence"]["E0001"]["document"]["metadata"]["evidence_id"] == "E0001"
+    assert {entry["evidence_id"] for entry in envelope["catalog"]} == {"E0001"}
     assert result.tools_used == ["get_inspection_result"]
     assert {fact.evidence_id for fact in result.observed_facts} == {result.tool_execution_trace[0].evidence_id}
     storage.get_inspection.assert_called_once_with("INSP-000001")
@@ -211,7 +202,7 @@ def test_sdk_transport_serializes_schema_and_keeps_fast_path_and_evidence(storag
 
 def test_unreviewed_generated_schema_fails_safely_before_final_request(storage):
     service, generator = service_for(storage, normal_responses())
-    with patch("backend.agent.service.diagnosis_response_json_schema", side_effect=ValueError("UNSUPPORTED_DIAGNOSIS_SCHEMA")):
+    with patch("backend.agent.service.simple_output_schema", side_effect=ValueError("UNSUPPORTED_DIAGNOSIS_SCHEMA")):
         result = asyncio.run(service.analyze("INSP-000001"))
     assert result.error_code == "RESPONSE_SCHEMA_INVALID"
     assert generator.await_count == 1

@@ -22,7 +22,8 @@ from backend.inspection import ImageRegistry
 from backend.main import app
 from backend.storage import JsonlInspectionStorage, StorageError
 from tests.test_agent_tools import make_log, make_record
-from tests.test_agent_service import call_response, normal_responses, report_payload, service_for, text_response
+from tests.agent_error_fixtures import error_logs, error_record, with_error_facts
+from tests.test_agent_service import report_response, call_response, normal_responses, report_payload, service_for, text_response, with_quality_facts
 
 
 @pytest.fixture(autouse=True)
@@ -84,15 +85,27 @@ def test_normal_analysis_http_contract_trace_and_jsonl_immutability(harness):
 @pytest.mark.parametrize("scenario", ["warning", "failed"])
 def test_warning_and_failed_inspection_records_are_analyzable(harness, scenario):
     changes = ({"image_quality_status": "WARNING_LOW_BRIGHTNESS", "final_result": "REINSPECT",
-                "final_reason_code": "IMAGE_QUALITY_WARNING", "metrics": {"mean": 81.24}} if scenario == "warning" else
+                "final_reason_code": "IMAGE_QUALITY_WARNING", "metrics": {**make_record().metrics, "mean": 81.24}} if scenario == "warning" else
                {"status": "FAILED", "result": "UNKNOWN", "image_quality_status": "ERROR",
                 "defect_detection_status": "SKIPPED", "final_result": "ERROR", "final_reason_code": "INSPECTION_FAILED",
                 "anomaly_score": None})
     record = harness.storage.save_inspection(make_record(**changes))
+    if scenario == "failed":
+        record = harness.storage.save_inspection(error_record())
+        harness.storage.save_logs(error_logs())
     summary = "REINSPECTION_REQUIRED" if scenario == "warning" else "INSPECTION_FAILED"
     payload = report_payload(record, summary)
     payload["recommended_checks"] = [{"check_code": "MANUAL_REINSPECTION", "evidence_refs": ["F0005"]}]
-    service, generator = service_for(harness.storage, normal_responses(payload, continue_investigation=True))
+    responses = normal_responses(payload, continue_investigation=True)
+    if scenario == "failed":
+        payload = with_error_facts(payload, record, harness.storage.get_logs("INSP-000001"))
+        responses = [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
+            call_response(("get_execution_logs", {"inspection_id": "INSP-000001"})), report_response(payload)]
+    if scenario == "warning":
+        payload = with_quality_facts(payload, record)
+        responses = [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
+            call_response(("analyze_image_quality", {"inspection_id": "INSP-000001"})), report_response(payload)]
+    service, generator = service_for(harness.storage, responses)
     app.dependency_overrides[get_agent_service] = lambda: service
     before = file_hashes(harness)
     response = harness.client.post("/analyze/INSP-000001")
@@ -250,7 +263,7 @@ def test_sensitive_original_data_is_not_exposed_in_success_response(harness):
     harness.storage.save_log(make_log(message=malicious, metrics={"actual_label": "NG"}))
     responses = [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                                ("get_execution_logs", {"inspection_id": "INSP-000001"})),
-                 text_response(json.dumps(report_payload()))]
+                 report_response(report_payload())]
     service, generator = service_for(harness.storage, responses)
     app.dependency_overrides[get_agent_service] = lambda: service
     before = file_hashes(harness)
@@ -272,7 +285,7 @@ def test_legacy_missing_fields_are_returned_as_null(harness):
     payload["inspection_id"] = "INSP-000002"
     payload["recommended_checks"] = [{"check_code": "MODEL_SERVICE_CHECK", "evidence_refs": ["F0002"]}]
     service, generator = service_for(harness.storage, [call_response(("get_inspection_result", {"inspection_id": "INSP-000002"})),
-                                                     text_response(), text_response(json.dumps(payload))])
+                                                     text_response(), report_response(payload)])
     app.dependency_overrides[get_agent_service] = lambda: service
     response = harness.client.post("/analyze/INSP-000002")
     assert response.status_code == 200
@@ -284,7 +297,7 @@ def test_legacy_missing_fields_are_returned_as_null(harness):
 def test_sequential_requests_have_independent_ids_and_real_traces(harness):
     responses = normal_responses() + [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                                                    ("get_execution_logs", {"inspection_id": "INSP-000001"})),
-                                     text_response(json.dumps(report_payload()))]
+                                     report_response(report_payload())]
     service, generator = service_for(harness.storage, responses)
     app.dependency_overrides[get_agent_service] = lambda: service
     first = harness.client.post("/analyze/INSP-000001").json()
@@ -355,7 +368,7 @@ def test_concurrent_requests_share_client_but_not_state(harness, prohibit_real_s
         if kwargs["config"].response_mime_type == "application/json":
             payload = report_payload(harness.record if target == "INSP-000001" else second_record)
             payload["inspection_id"] = target
-            return text_response(json.dumps(payload))
+            return report_response(payload)(**kwargs)
         if len(kwargs["contents"]) == 1:
             return call_response(("get_inspection_result", {"inspection_id": target}))
         return text_response()

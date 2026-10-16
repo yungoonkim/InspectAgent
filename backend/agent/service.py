@@ -14,23 +14,30 @@ from google import genai
 from google.genai import types
 from pydantic import ValidationError
 
+from backend.agent.errors import AgentFailure
+from backend.agent.error_policy import (
+    error_report_covered, error_report_scope, error_required_facts, image_load_failure_evidence_ready,
+)
+from backend.agent.investigation import (
+    validate_required_warning_events, warning_evidence_ready, warning_report_covered, warning_report_scope,
+)
 from backend.agent.prompts import REPORT_SYSTEM_INSTRUCTION, SYSTEM_INSTRUCTION
+from backend.agent.reporting import CORE_FIELDS, _same_scalar, build_catalog, catalog_json, convert_simple_report, simple_output_schema
 from backend.agent.schemas import (
-    AgentLimits, DiagnosisDraft, DiagnosisResult, HistoryArguments, Hypothesis,
+    AgentLimits, DiagnosisResult, HistoryArguments, Hypothesis,
     InspectionArguments, RecommendedCheck, TokenUsage, ToolExecutionTrace,
-    diagnosis_response_json_schema,
 )
 from backend.agent.tools import INSPECTION_ID_PATTERN, InspectionTools, _valid_id
 from backend.config import get_settings
 
 PRODUCT_ALIAS = "TARGET-PRODUCT"
+FINAL_REPORT_RESERVE_SECONDS = 2
 ARGUMENT_MODELS = {
     "get_inspection_result": InspectionArguments,
     "get_execution_logs": InspectionArguments,
     "analyze_image_quality": InspectionArguments,
     "get_inspection_history": HistoryArguments,
 }
-CORE_FIELDS = ("status", "result", "image_quality_status", "defect_detection_status", "final_result", "final_reason_code")
 SUMMARY_TEXT = {
     "NORMAL_MODEL_RESULT": "기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지 않습니다.",
     "PRODUCT_ANOMALY": "기록된 종합 판정은 NG입니다. 저장된 제품 이상 탐지 근거를 확인해야 합니다.",
@@ -63,12 +70,6 @@ _TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="inspectio
 _TOOL_SLOTS = threading.BoundedSemaphore(4)
 
 
-class AgentFailure(Exception):
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
-
-
 @dataclass
 class RequestState:
     inspection_id: str
@@ -78,6 +79,7 @@ class RequestState:
     repeats: dict = field(default_factory=dict)
     product_id: Optional[str] = None
     snapshot: Optional[dict] = None
+    deadline: Optional[float] = None
 
 
 def function_declarations():
@@ -120,12 +122,6 @@ def _resolve_pointer(document: Any, pointer: str):
     return current
 
 
-def _same_scalar(left: Any, right: Any) -> bool:
-    if type(left) in (int, float) and type(right) in (int, float):
-        return left == right
-    return type(left) is type(right) and left == right
-
-
 def _normal_evidence_ready(state):
     expected = ("COMPLETED", "OK", "NORMAL", "COMPLETED", "OK", "ALL_CHECKS_PASSED")
     if state.snapshot is None or tuple(state.snapshot.get(name) for name in CORE_FIELDS) != expected:
@@ -136,19 +132,20 @@ def _normal_evidence_ready(state):
             and math.isfinite(score) and math.isfinite(threshold) and score <= threshold)
 
 
-def _report_contents(state):
+def _report_contents(state, catalog=None, required_warning_event_codes=()):
     if state.snapshot is None or not state.evidence:
         raise AgentFailure("INSUFFICIENT_EVIDENCE")
     envelope = {
         "inspection_id": state.inspection_id,
-        "evidence": {identifier: {"source_tool": tool, "document": document}
-                     for identifier, (tool, document) in state.evidence.items()},
+        "catalog": json.loads(catalog_json(catalog or build_catalog(state)))["entries"],
         "tool_execution_trace": [
             {name: getattr(entry, name) for name in
              ("sequence", "tool_name", "executed", "success", "error_code", "evidence_id")}
             for entry in state.trace
         ],
     }
+    if required_warning_event_codes:
+        envelope["required_warning_event_codes"] = list(required_warning_event_codes)
     return [types.Content(role="user", parts=[types.Part.from_text(
         text=json.dumps(envelope, ensure_ascii=False, allow_nan=False),
     )])]
@@ -176,25 +173,28 @@ def _validate_history(contents):
         raise AgentFailure("MODEL_RESPONSE_INVALID")
 
 
-def _signals(facts):
+def _signals(facts, *, workflow_error=False):
     facts = [fact for fact in facts if fact.source_tool != "get_inspection_history"]
     signals = set()
     values = {(fact.source_field, str(fact.observed_value)) for fact in facts}
     for fact in facts:
         if fact.source_field.endswith("/image_quality_status") and fact.observed_value in ("WARNING_LOW_BRIGHTNESS", "WARNING_HIGH_BRIGHTNESS"):
             signals.add("brightness")
-        if fact.source_event == "IMAGE_LOAD_FAILED":
+        if fact.source_event == "IMAGE_LOAD_FAILED" and (not workflow_error
+            or fact.source_field.endswith("/event_code") and fact.observed_value == "IMAGE_LOAD_FAILED"):
             signals.add("load")
-        if fact.source_field.endswith("/defect_detection_status") and fact.observed_value in ("FAILED", "SKIPPED", "UNINSPECTED"):
+        if workflow_error and fact.source_event == "INFERENCE_FAILED" and fact.source_field.endswith("/event_code") and fact.observed_value == "INFERENCE_FAILED":
             signals.add("model")
-        if fact.source_field == "/data/result" and fact.observed_value == "UNKNOWN":
+        if not workflow_error and fact.source_field.endswith("/defect_detection_status") and fact.observed_value in ("FAILED", "SKIPPED", "UNINSPECTED"):
+            signals.add("model")
+        if not workflow_error and fact.source_field == "/data/result" and fact.observed_value == "UNKNOWN":
             signals.add("model")
         if fact.source_field.endswith("/final_result"):
             if fact.observed_value in ("REINSPECT", "NG", "ERROR"):
                 signals.add("manual")
             if fact.observed_value == "OK":
                 signals.add("ok")
-    if ("/data/status", "FAILED") in values and ("/data/image_quality_status", "ERROR") in values:
+    if not workflow_error and ("/data/status", "FAILED") in values and ("/data/image_quality_status", "ERROR") in values:
         signals.add("load")
     return signals
 
@@ -202,8 +202,10 @@ def _signals(facts):
 class AgentService:
     """Async orchestration; an injected SDK-shaped client enables offline testing."""
 
-    def __init__(self, tools: InspectionTools, settings=None, client=None, limits: Optional[AgentLimits] = None):
+    def __init__(self, tools: InspectionTools, settings=None, client=None, limits: Optional[AgentLimits] = None,
+                 *, required_warning_event_codes=()):
         self.tools = tools
+        self.required_warning_event_codes = validate_required_warning_events(required_warning_event_codes)
         self.settings = settings or get_settings()
         self.client = client
         self.limits = limits or AgentLimits(
@@ -212,12 +214,14 @@ class AgentService:
             max_repeat_calls=self.settings.AGENT_MAX_REPEAT_CALLS,
             request_timeout_seconds=self.settings.AGENT_REQUEST_TIMEOUT_SECONDS,
             model_timeout_seconds=self.settings.AGENT_MODEL_TIMEOUT_SECONDS,
+            final_model_timeout_seconds=getattr(self.settings, "AGENT_FINAL_MODEL_TIMEOUT_SECONDS", 15),
             tool_timeout_seconds=self.settings.AGENT_TOOL_TIMEOUT_SECONDS,
             max_payload_bytes=self.settings.AGENT_MAX_PAYLOAD_BYTES,
         )
 
     async def analyze(self, inspection_id: str) -> DiagnosisResult:
-        state = RequestState(inspection_id=inspection_id)
+        state = RequestState(inspection_id=inspection_id,
+            deadline=time.monotonic() + self.limits.request_timeout_seconds)
         model = self.settings.GEMINI_MODEL
         safe_model = model if isinstance(model, str) and re.fullmatch(r"gemini-[A-Za-z0-9][A-Za-z0-9_.-]{0,80}", model) else None
         client = self.client
@@ -238,7 +242,10 @@ class AgentService:
                     ),
                 )
                 owned_client = True
-            async with asyncio.timeout(self.limits.request_timeout_seconds):
+            remaining = state.deadline - time.monotonic()
+            if not math.isfinite(remaining) or remaining <= 0:
+                raise AgentFailure("AGENT_TIMEOUT")
+            async with asyncio.timeout(remaining):
                 return await self._run(client, safe_model, state)
         except AgentFailure as failure:
             error = failure.code
@@ -259,6 +266,22 @@ class AgentService:
             tools_used=self._tools_used(state), tool_execution_trace=state.trace, token_usage=state.usage,
         )
 
+    def _request_timeout_seconds(self, state, structured):
+        now = time.monotonic()
+        if state.deadline is None:
+            state.deadline = now + self.limits.request_timeout_seconds
+        remaining = state.deadline - now
+        if not math.isfinite(remaining) or remaining <= 0:
+            raise AgentFailure("AGENT_TIMEOUT")
+        if structured:
+            available = math.floor(remaining - FINAL_REPORT_RESERVE_SECONDS)
+            if available < 1:
+                raise AgentFailure("AGENT_TIMEOUT")
+            return min(self.limits.final_model_timeout_seconds, available)
+        if self.limits.model_timeout_seconds > remaining:
+            raise AgentFailure("AGENT_TIMEOUT")
+        return self.limits.model_timeout_seconds
+
     async def _generate(self, client, model, contents, state, round_number, structured=False):
         _validate_history(contents)
         if structured and (len(contents) != 1 or len(contents[0].parts) != 1
@@ -266,13 +289,15 @@ class AgentService:
             raise AgentFailure("MODEL_RESPONSE_INVALID")
         if _json_bytes([content.model_dump(mode="json", exclude_none=True) for content in contents]) > self.limits.max_payload_bytes:
             raise AgentFailure("CONTEXT_TOO_LARGE")
+        timeout_seconds = self._request_timeout_seconds(state, structured)
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION, temperature=0, candidate_count=1,
             max_output_tokens=self.limits.max_output_tokens,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             automatic_continuation=False,
             http_options=types.HttpOptions(
-                timeout=int(self.limits.model_timeout_seconds * 1000),
+                timeout=int(timeout_seconds * 1000),
+                headers={"X-Server-Timeout": str(math.ceil(timeout_seconds))},
                 retry_options=types.HttpRetryOptions(attempts=1),
             ),
         )
@@ -280,7 +305,7 @@ class AgentService:
             config.system_instruction = REPORT_SYSTEM_INSTRUCTION
             config.response_mime_type = "application/json"
             try:
-                config.response_json_schema = diagnosis_response_json_schema()
+                config.response_json_schema = simple_output_schema()
             except ValueError:
                 raise AgentFailure("RESPONSE_SCHEMA_INVALID") from None
         else:
@@ -289,7 +314,7 @@ class AgentService:
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(model=model, contents=list(contents), config=config),
-                timeout=self.limits.model_timeout_seconds,
+                timeout=timeout_seconds,
             )
         except TimeoutError:
             raise AgentFailure("GEMINI_TIMEOUT") from None
@@ -311,9 +336,19 @@ class AgentService:
             raise AgentFailure("MODEL_RESPONSE_INCOMPLETE")
         return candidate.content
 
+    def _investigation_ready(self, state):
+        if state.snapshot is not None and not isinstance(state.snapshot, dict):
+            return False
+        return _normal_evidence_ready(state) or warning_evidence_ready(
+            state, required_event_codes=self.required_warning_event_codes,
+        ) or (not self.required_warning_event_codes and image_load_failure_evidence_ready(state))
+
     async def _run(self, client, model, state):
+        event_requirement = (" Required warning events: " + ", ".join(self.required_warning_event_codes)
+            + ". Read execution logs before completing this warning report; include actual stage and timestamp facts."
+            if self.required_warning_event_codes else "")
         contents = [types.Content(role="user", parts=[types.Part.from_text(
-            text=f"Diagnose the recorded inspection {state.inspection_id}. Collect evidence using the declared tools.",
+            text=f"Diagnose the recorded inspection {state.inspection_id}. Collect evidence using the declared tools." + event_requirement,
         )])]
         for round_number in range(1, self.limits.max_tool_rounds + 2):
             content = await self._generate(client, model, contents, state, round_number)
@@ -332,20 +367,17 @@ class AgentService:
                     name=call.name, id=call.id, response=result,
                 )))
             contents.append(types.Content(role="user", parts=responses))
-            if _normal_evidence_ready(state):
+            if self._investigation_ready(state):
                 break
-        final = await self._generate(client, model, _report_contents(state), state, round_number + 1, structured=True)
+        if error_report_scope(state):
+            error_required_facts(state)
+        catalog = build_catalog(state, max_bytes=min(65536, self.limits.max_payload_bytes))
+        final = await self._generate(client, model,
+            _report_contents(state, catalog, self.required_warning_event_codes), state, round_number + 1, structured=True)
         if any(part.function_call is not None for part in final.parts or []):
             raise AgentFailure("UNEXPECTED_FUNCTION_CALL")
         text = "".join(part.text for part in final.parts or [] if part.text and not part.thought)
-        try:
-            payload = json.loads(text, parse_constant=self._invalid_json_constant, object_pairs_hook=self._unique_keys)
-        except (ValueError, TypeError):
-            raise AgentFailure("FINAL_JSON_INVALID") from None
-        try:
-            draft = DiagnosisDraft.model_validate(payload)
-        except ValidationError:
-            raise AgentFailure("RESPONSE_SCHEMA_INVALID") from None
+        draft = convert_simple_report(text, state, catalog)
         return self._verify_report(draft, state, model)
 
     async def _execute(self, call, state, round_number):
@@ -468,15 +500,21 @@ class AgentService:
             cause_signal = {"ILLUMINATION_CHANGE": "brightness", "EXPOSURE_SETTING": "brightness", "IMAGE_ACQUISITION": "load", "MODEL_AVAILABILITY": "model"}
             check_signal = {"LIGHTING_EXPOSURE_CHECK": "brightness", "IMAGE_REGISTRATION_ACCESS_CHECK": "load", "MODEL_SERVICE_CHECK": "model", "MANUAL_REINSPECTION": "manual", "CONTINUE_MONITORING": "ok"}
             for selection in draft.possible_causes:
-                if cause_signal[selection.cause_code] not in _signals([facts[reference] for reference in selection.evidence_refs]):
+                if cause_signal[selection.cause_code] not in _signals([facts[reference] for reference in selection.evidence_refs], workflow_error=error_report_scope(state)):
                     raise KeyError("unsupported cause")
             for selection in draft.recommended_checks:
-                if check_signal[selection.check_code] not in _signals([facts[reference] for reference in selection.evidence_refs]):
+                if check_signal[selection.check_code] not in _signals([facts[reference] for reference in selection.evidence_refs], workflow_error=error_report_scope(state)):
                     raise KeyError("unsupported check")
         except (KeyError, IndexError, TypeError, ValueError):
             raise AgentFailure("EVIDENCE_MISMATCH") from None
         expected_summary = {"OK": "NORMAL_MODEL_RESULT", "NG": "PRODUCT_ANOMALY", "REINSPECT": "REINSPECTION_REQUIRED", "ERROR": "INSPECTION_FAILED"}.get(state.snapshot["final_result"], "INSUFFICIENT_DATA")
         if draft.overall_summary != expected_summary:
+            raise AgentFailure("EVIDENCE_MISMATCH")
+        if error_report_scope(state) and not error_report_covered(draft, state):
+            raise AgentFailure("EVIDENCE_MISMATCH")
+        if warning_report_scope(state) and not warning_report_covered(
+            draft, state, required_event_codes=self.required_warning_event_codes,
+        ):
             raise AgentFailure("EVIDENCE_MISMATCH")
         limitations = set(draft.limitations) | {"MODEL_NOT_GUARANTEE", "UNKNOWN_PHYSICAL_CAUSE", "NO_PROBABILITY_CALIBRATION"}
         quality = [document for tool, document in state.evidence.values() if tool == "analyze_image_quality"]
@@ -505,16 +543,3 @@ class AgentService:
     def _consume_background_exception(completed):
         if not completed.cancelled():
             completed.exception()
-
-    @staticmethod
-    def _invalid_json_constant(value):
-        raise ValueError("non-finite JSON")
-
-    @staticmethod
-    def _unique_keys(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("duplicate JSON key")
-            result[key] = value
-        return result

@@ -12,8 +12,10 @@ from backend.agent.prompts import FINAL_REPORT_INSTRUCTION
 from backend.agent.schemas import AgentLimits
 from backend.agent.service import CORE_FIELDS, RequestState, _normal_evidence_ready
 from backend.storage import InspectionStorageBase
-from tests.test_agent_service import call_response, normal_responses, report_payload, service_for, text_response
+from tests.test_agent_service import report_response, call_response, normal_responses, report_payload, service_for, text_response, with_quality_facts
 from tests.test_agent_tools import make_log, make_record
+from tests.agent_error_fixtures import error_logs, error_record, with_error_facts
+from tests.agent_deadline_control import ControlledDeadlines
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +54,7 @@ def test_normal_result_finishes_without_optional_tools_or_readiness_request(stor
     assert FINAL_REPORT_INSTRUCTION in final["config"].system_instruction
     assert [content.role for content in final["contents"]] == ["user"]
     envelope = json.loads(final["contents"][0].parts[0].text)
-    assert list(envelope["evidence"]) == ["E0001"]
+    assert {entry["evidence_id"] for entry in envelope["catalog"]} == {"E0001"}
 
 
 @pytest.mark.parametrize("field", CORE_FIELDS)
@@ -89,6 +91,9 @@ def test_warning_quality_and_failure_log_investigations_remain_available(storage
         summary = "INSPECTION_FAILED"
         storage.get_logs.return_value = [make_log(event_code="IMAGE_LOAD_FAILED")]
     record = make_record(**changes)
+    if scenario == "failed":
+        record = error_record()
+        storage.get_logs.return_value = error_logs()
     storage.get_inspection.return_value = record
     payload = report_payload(record, summary)
     payload["recommended_checks"] = [{"check_code": "MANUAL_REINSPECTION", "evidence_refs": ["F0005"]}]
@@ -96,20 +101,25 @@ def test_warning_quality_and_failure_log_investigations_remain_available(storage
     payload["observed_facts"].append({"fact_id": "F0007", "evidence_id": "E0002", "source_tool": additional_tool,
         "source_field": field, "observed_value": "WARNING_LOW_BRIGHTNESS" if scenario == "warning" else "IMAGE_LOAD_FAILED",
         "source_event": None if scenario == "warning" else "IMAGE_LOAD_FAILED"})
+    if scenario == "warning":
+        payload = with_quality_facts(payload, record)
+    else:
+        payload = with_error_facts(payload, record)
     responses = [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
-                 call_response((additional_tool, {"inspection_id": "INSP-000001"})), text_response(), text_response(json.dumps(payload))]
+                 call_response((additional_tool, {"inspection_id": "INSP-000001"})),
+                 report_response(payload)]
     service, generator = service_for(storage, responses)
     result = asyncio.run(service.analyze("INSP-000001"))
     assert result.analysis_status == "COMPLETED"
     assert result.tools_used == ["get_inspection_result", additional_tool]
     assert [entry.round_number for entry in result.tool_execution_trace] == [1, 2]
-    assert generator.await_count == 4
+    assert generator.await_count == 3
     assert result.observed_facts[-1].evidence_id == "E0002"
 
 
 def test_fast_path_report_serializes_independently_of_native_function_history(storage):
     first = call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}), signature=bytes(range(256)))
-    service, generator = service_for(storage, [first, text_response(json.dumps(report_payload()))])
+    service, generator = service_for(storage, [first, report_response(report_payload())])
     result = asyncio.run(service.analyze("INSP-000001"))
     assert result.analysis_status == "COMPLETED"
     arguments = generator.call_args_list[1].kwargs
@@ -121,7 +131,7 @@ def test_fast_path_report_serializes_independently_of_native_function_history(st
     assert [content["role"] for content in body["contents"]] == ["user"]
     assert set(body["contents"][0]["parts"][0]) == {"text"}
     envelope = json.loads(body["contents"][0]["parts"][0]["text"])
-    assert envelope["evidence"]["E0001"]["document"]["metadata"]["evidence_id"] == "E0001"
+    assert {entry["evidence_id"] for entry in envelope["catalog"]} == {"E0001"}
     assert first.candidates[0].content.parts[0].thought_signature == bytes(range(256))
     json.dumps(body, allow_nan=False)
 
@@ -137,18 +147,20 @@ def test_normal_fast_path_does_not_bypass_evidence_validation(storage):
     assert result.tool_execution_trace[0].executed and result.tool_execution_trace[0].success
 
 
-@pytest.mark.parametrize("limits,error", [(AgentLimits(model_timeout_seconds=0.005), "GEMINI_TIMEOUT"),
-    (AgentLimits(request_timeout_seconds=0.02), "AGENT_TIMEOUT")])
-def test_final_request_keeps_model_and_overall_deadlines(storage, limits, error):
-    service, generator = service_for(storage, [], limits)
+@pytest.mark.parametrize("kind,error", [("model", "GEMINI_TIMEOUT"), ("overall", "AGENT_TIMEOUT")])
+def test_final_request_keeps_model_and_overall_deadlines(storage, kind, error):
+    service, generator = service_for(storage, [], AgentLimits())
 
-    async def generate(**kwargs):
-        if kwargs["config"].response_mime_type == "application/json":
-            await asyncio.Event().wait()
-        return call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}))
+    async def run():
+        with ControlledDeadlines() as deadlines:
+            async def generate(**kwargs):
+                if kwargs["config"].response_mime_type == "application/json":
+                    await deadlines.expire(kind)
+                return call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}))
+            generator.side_effect = generate
+            return await service.analyze("INSP-000001")
 
-    generator.side_effect = generate
-    result = asyncio.run(service.analyze("INSP-000001"))
+    result = asyncio.run(run())
     assert result.error_code == error
     assert generator.await_count == 2
     assert result.tools_used == ["get_inspection_result"]
@@ -161,8 +173,8 @@ def test_fast_path_request_states_and_token_usage_are_isolated(storage):
     storage.get_inspection.side_effect = [first_record, second_record]
     second_payload = report_payload(second_record)
     second_payload["inspection_id"] = "INSP-000002"
-    first_final = text_response(json.dumps(report_payload(first_record)))
-    second_final = text_response(json.dumps(second_payload))
+    first_final = report_response(report_payload(first_record))
+    second_final = report_response(second_payload)
     first_final.usage_metadata = types.GenerateContentResponseUsageMetadata(prompt_token_count=20, candidates_token_count=10, total_token_count=30)
     second_final.usage_metadata = types.GenerateContentResponseUsageMetadata(prompt_token_count=30, candidates_token_count=20, total_token_count=50)
     service, generator = service_for(storage, [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})), first_final,

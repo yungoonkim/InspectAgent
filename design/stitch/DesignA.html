@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>VisionInsight - 실시간 검사</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @layer base {
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #0c1322;
+        color: #dce2f7;
+      }
+    }
+    ::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container": "#191f2f",
+            "surface-container-highest": "#2e3545",
+            "surface-container-high": "#232a3a",
+            "surface-container-low": "#141b2b",
+            "surface-container-lowest": "#070e1d",
+            "background": "#0c1322",
+            "primary": "#4cd7f6",
+            "primary-container": "#06b6d4",
+            "on-primary": "#003640",
+            "secondary": "#4edea3",
+            "error": "#ffb4ab",
+            "error-container": "#93000a",
+            "on-error-container": "#ffdad6",
+            "on-surface": "#dce2f7",
+            "on-surface-variant": "#94a3b8",
+            "outline": "#334155"
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-background font-sans antialiased min-h-screen text-on-surface">
+<!-- TOP MINIMAL & ELEGANT HEADER -->
+<header class="h-16 border-b border-slate-800/80 bg-surface-container-lowest/80 backdrop-blur-md sticky top-0 z-50 px-8 flex items-center justify-between">
+<!-- Brand / Title -->
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-3">
+<img alt="VisionInsight Logo" class="h-7 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1VOmtJVXrTKEkZEGrKd0ds7pOITw0vR78bOkZZqrh041LM0VeNIAQcQgjknIxn-q2g3M0qcVOtlbdyXmpzc-c9POb7CZjxadLauYFdpnkBahV88BhTsdJYd0r5y5EU9vTY-069fsmJMFYJRNGBIDAJEGfjYVkPf0bFDdQoQCc4_QbTdwtMASw7Dkj0wcKxv1Z__HIZMTbKJw6GPqnbL6te8B59Rlne3K4YXjHSnt9bjQjK3mD9srSUPHK8"/>
+<span class="font-bold text-lg text-white tracking-tight">VisionInsight</span>
+</div>
+<!-- Navigation Tabs -->
+<nav class="flex items-center gap-1">
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-semibold bg-primary/10 text-primary transition-all" href="#">
+          실시간 검사 (Live Inspection)
+        </a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-on-surface-variant hover:text-on-surface hover:bg-slate-800/50 transition-all" href="#">
+          검사 이력 (History)
+        </a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-on-surface-variant hover:text-on-surface hover:bg-slate-800/50 transition-all" href="#">
+          AI 보고서 (AI Reports)
+        </a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-on-surface-variant hover:text-on-surface hover:bg-slate-800/50 transition-all" href="#">
+          이벤트 로그 (Event Logs)
+        </a>
+</nav>
+</div>
+<!-- Right Mode Badge -->
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 rounded-full text-xs font-mono font-medium tracking-wide bg-slate-800 text-slate-300 border border-slate-700/60">
+        Demo Mode (데모 모드)
+      </span>
+</div>
+</header>
+<!-- MAIN WORKSPACE CONTAINER (Targeted at balanced 1440px desktop) -->
+<main class="max-w-[1440px] mx-auto px-8 py-8 space-y-6">
+<!-- TWO-COLUMN CORE WORKSPACE -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- LEFT COLUMN: LIVE VIEW -->
+<section class="bg-surface-container-low rounded-2xl border border-slate-800/60 p-5 flex flex-col justify-between shadow-sm">
+<!-- Header -->
+<div class="flex items-center justify-between pb-3">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<h2 class="font-semibold text-base text-white">Live View</h2>
+</div>
+<span class="text-xs font-mono px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
+            SIMULATED LIVE (가상 시뮬레이션)
+          </span>
+</div>
+<!-- Video Viewport (16:9, clean & free of clutter) -->
+<div class="relative aspect-video rounded-xl overflow-hidden bg-surface-container-lowest border border-slate-800/80 my-2">
+<img alt="Conveyor Bottle Inspection Feed" class="w-full h-full object-cover filter contrast-[1.03] brightness-[0.95]" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAfsRUT6UjJZCZQtgsNKsEY0iQnyKaAnzgI72qIgz7L9jQ_j18xOUhv4L-KnGkBABtuAoIKjbrnBTv_AMNzjzBlI6VK4paMLKV8gF4Hj70HkqwSuwrfszsD8p4AuLZMI3LGMSLlVitJURVfzBFDanum6gj095gzyAtib_l3IAlbF71k-ahL1s-1-L6X1Ejq89QF-Pxzqk-Okkl1P39ymO2XhmMfaQWWMZvthSAqyRBRO5pVZCguPbwA"/>
+</div>
+<!-- Minimal Stream Controls Footer -->
+<div class="flex items-center justify-between pt-3">
+<button class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-slate-300 text-sm font-medium transition-all" type="button">
+<span class="material-symbols-outlined text-[18px]">pause</span>
+<span>일시정지</span>
+</button>
+<button class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-on-primary hover:brightness-110 active:scale-[0.98] text-sm font-semibold shadow-sm transition-all" id="btn-grab-frame" type="button">
+<span class="material-symbols-outlined text-[18px]">photo_camera</span>
+<span>Grab Frame (프레임 캡처)</span>
+</button>
+</div>
+</section>
+<!-- RIGHT COLUMN: GRAB IMAGE & ROI SELECTION -->
+<section class="bg-surface-container-low rounded-2xl border border-slate-800/60 p-5 flex flex-col justify-between shadow-sm">
+<!-- Header -->
+<div class="flex items-center justify-between pb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[18px]">crop</span>
+<h2 class="font-semibold text-base text-white">Grab Image &amp; ROI Selection</h2>
+</div>
+<span class="text-xs font-mono text-on-surface-variant">CAP-8849</span>
+</div>
+<!-- Captured Frame with Precision Draggable ROI Overlay -->
+<div class="relative aspect-video rounded-xl overflow-hidden bg-surface-container-lowest border border-slate-800/80 my-2 group">
+<img alt="Captured Bottle Frame" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAfsRUT6UjJZCZQtgsNKsEY0iQnyKaAnzgI72qIgz7L9jQ_j18xOUhv4L-KnGkBABtuAoIKjbrnBTv_AMNzjzBlI6VK4paMLKV8gF4Hj70HkqwSuwrfszsD8p4AuLZMI3LGMSLlVitJURVfzBFDanum6gj095gzyAtib_l3IAlbF71k-ahL1s-1-L6X1Ejq89QF-Pxzqk-Okkl1P39ymO2XhmMfaQWWMZvthSAqyRBRO5pVZCguPbwA"/>
+<!-- Clean Elegant ROI Bounding Box -->
+<div class="absolute top-[28%] left-[34%] w-[32%] h-[36%] border-2 border-primary bg-primary/10 rounded-sm cursor-move">
+<!-- ROI Tag -->
+<div class="absolute -top-6 left-0 px-1.5 py-0.5 rounded text-[11px] font-mono font-medium bg-primary text-on-primary">
+              ROI: BOTTLE_FINISH
+            </div>
+<!-- Corner Handles -->
+<span class="absolute -top-1 -left-1 w-2 h-2 bg-primary rounded-xs"></span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-xs"></span>
+<span class="absolute -bottom-1 -left-1 w-2 h-2 bg-primary rounded-xs"></span>
+<span class="absolute -bottom-1 -right-1 w-2 h-2 bg-primary rounded-xs"></span>
+</div>
+<!-- Minimal Coordinate Indicator -->
+<div class="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded bg-black/60 backdrop-blur-sm text-[11px] font-mono text-slate-300">
+            X: 412, Y: 188 | 340 × 260 px
+          </div>
+</div>
+<!-- ROI Actions Footer -->
+<div class="flex items-center justify-between pt-3">
+<button class="px-3.5 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-slate-400 hover:text-slate-200 text-sm font-medium transition-all" type="button">
+            ROI 초기화 (Reset)
+          </button>
+<button class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-primary-container text-on-primary hover:brightness-110 active:scale-[0.98] text-sm font-semibold shadow-sm transition-all" id="btn-run-inspection" type="button">
+<span class="material-symbols-outlined text-[18px]">search_insights</span>
+<span>검사 실행 (Run Inspection)</span>
+</button>
+</div>
+</section>
+</div>
+<!-- LOWER SECTION: DETERMINISTIC RESULT & GEMINI DIAGNOSIS (CLEAN & SEPARATED) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- PATCHCORE INSPECTION RESULT (5 COLS) -->
+<section class="lg:col-span-5 bg-surface-container-low rounded-2xl border border-slate-800/60 p-5 flex flex-col justify-between shadow-sm">
+<div>
+<!-- Header -->
+<div class="flex items-center justify-between pb-4">
+<span class="text-xs font-mono uppercase tracking-wider text-on-surface-variant">PatchCore 판정 결과</span>
+<span class="text-xs font-mono text-slate-400">Model v1.2</span>
+</div>
+<!-- Verdict Banner -->
+<div class="p-4 rounded-xl bg-surface-container flex items-center justify-between mb-4 border border-slate-800/50">
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 rounded-md bg-error text-surface-container-lowest font-mono font-bold text-sm tracking-wider">
+                NG
+              </span>
+<div>
+<h3 class="font-bold text-white text-base">불량 검출 (Defect Detected)</h3>
+<p class="text-xs text-on-surface-variant mt-0.5">나사선 미세 크랙 의심</p>
+</div>
+</div>
+<span class="text-xs font-mono text-slate-400">16.8ms</span>
+</div>
+<!-- Anomaly Metric & Calm Gauge -->
+<div class="space-y-2 p-3.5 rounded-xl bg-surface-container-lowest border border-slate-800/40">
+<div class="flex items-center justify-between">
+<span class="text-xs text-on-surface-variant font-medium">검출 이상치 점수</span>
+<span class="text-sm font-mono font-bold text-error">41.8820</span>
+</div>
+<!-- Single Calm Progress Track -->
+<div class="relative w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+<div class="h-full bg-error rounded-full" style="width: 84%;"></div>
+</div>
+<div class="flex items-center justify-between text-[11px] font-mono text-on-surface-variant pt-0.5">
+<span>0.00</span>
+<span class="text-slate-300 font-medium">기준 임계값 (Threshold): 34.1442</span>
+<span>50.00</span>
+</div>
+</div>
+</div>
+<div class="pt-4 flex items-center justify-between text-xs text-on-surface-variant border-t border-slate-800/60 mt-4">
+<span>처리 상태: Ejector Triggered</span>
+<span class="font-mono text-slate-400">Line 04 Conveyor</span>
+</div>
+</section>
+<!-- GEMINI AI DIAGNOSIS (7 COLS) -->
+<section class="lg:col-span-7 bg-surface-container-low rounded-2xl border border-slate-800/60 p-5 flex flex-col justify-between shadow-sm">
+<div class="space-y-4">
+<!-- Card Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[18px]">auto_awesome</span>
+<h2 class="font-semibold text-base text-white">Gemini 1.5/Flash AI 진단 분석</h2>
+</div>
+<span class="text-xs font-mono text-primary font-medium">Powered by gemini-3.8-flash</span>
+</div>
+<!-- Policy & Principle Notice -->
+<p class="text-xs text-on-surface-variant bg-surface-container-lowest px-3 py-2 rounded-lg border border-slate-800/40">
+            PatchCore 판정 결과에 기반한 원인 분석 및 권장 조치 사항입니다. (검사 판정을 변경하지 않음)
+          </p>
+<!-- Defect Summary & Root Cause -->
+<div class="space-y-1">
+<h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">진단 요약</h4>
+<p class="text-sm text-on-surface leading-relaxed">
+              병 입구 나사선 부위 <span class="text-error font-medium">미세 균열(0.42mm Micro-crack)</span> 감지. 캡핑 시 가해진 비틀림 충격 또는 금형 급랭 과정에서의 표면 잔류 응력에 의한 발생 확률이 높습니다.
+            </p>
+</div>
+<!-- Recommended Checks Checklist -->
+<div class="space-y-2 pt-1">
+<h4 class="text-xs font-semibold text-secondary uppercase tracking-wider">권장 조치 체크리스트</h4>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300">
+<label class="flex items-center gap-2 p-2 rounded-lg bg-surface-container border border-slate-800/50 cursor-pointer hover:border-slate-700">
+<input checked="" class="rounded border-slate-700 text-secondary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span>캡핑 헤드 센터링 마모 점검</span>
+</label>
+<label class="flex items-center gap-2 p-2 rounded-lg bg-surface-container border border-slate-800/50 cursor-pointer hover:border-slate-700">
+<input class="rounded border-slate-700 text-secondary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span>몰드 냉각 공정 온도 편차 확인</span>
+</label>
+</div>
+</div>
+<!-- Expandable Detail Accordion -->
+<details class="group rounded-lg bg-surface-container-lowest border border-slate-800/50 text-xs">
+<summary class="p-2.5 font-medium text-slate-400 group-open:text-slate-200 cursor-pointer flex items-center justify-between select-none">
+<span>관측 사실 및 모델 한계 (Evidence &amp; Limitations)</span>
+<span class="material-symbols-outlined text-[16px] group-open:rotate-180 transition-transform">expand_more</span>
+</summary>
+<div class="p-3 pt-1 text-on-surface-variant border-t border-slate-800/40 space-y-1.5 leading-relaxed">
+<p>• 특징 공간 최대 이상 거리 D_max 지점이 병 입구 우측 상단 픽셀 영역과 98% 일치함.</p>
+<p>• 2D 반사광 이미지 특성상 균열 깊이(Depth)의 정밀 수치 측정에는 한계가 있으며, 심층 결함 추적 시 3D 레이저 프로파일러 검증을 권장합니다.</p>
+</div>
+</details>
+</div>
+</section>
+</div>
+</main>
+<script>
+    // Minimal feedback for frame grab and inspection buttons
+    document.getElementById('btn-grab-frame')?.addEventListener('click', function() {
+      const original = this.innerHTML;
+      this.innerHTML = '<span class="material-symbols-outlined text-[18px] animate-spin">refresh</span><span>캡처 중...</span>';
+      setTimeout(() => {
+        this.innerHTML = original;
+      }, 300);
+    });
+
+    document.getElementById('btn-run-inspection')?.addEventListener('click', function() {
+      const original = this.innerHTML;
+      this.innerHTML = '<span class="material-symbols-outlined text-[18px] animate-spin">refresh</span><span>검사 분석 중...</span>';
+      setTimeout(() => {
+        this.innerHTML = original;
+      }, 400);
+    });
+  </script>
+</body></html>

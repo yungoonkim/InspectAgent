@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
-    from pydantic import Field
+    from pydantic import Field, field_validator
 
     class Settings(BaseSettings):
         """Application settings loaded from environment variables or .env file."""
@@ -35,8 +35,16 @@ try:
         AGENT_MAX_REPEAT_CALLS: int = Field(default=2, ge=1, le=3)
         AGENT_REQUEST_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=180)
         AGENT_MODEL_TIMEOUT_SECONDS: float = Field(default=15, gt=0, le=60)
+        AGENT_FINAL_MODEL_TIMEOUT_SECONDS: int = Field(default=15, ge=1, le=30)
         AGENT_TOOL_TIMEOUT_SECONDS: float = Field(default=3, gt=0, le=10)
         AGENT_MAX_PAYLOAD_BYTES: int = Field(default=65536, ge=1024, le=262144)
+
+        @field_validator("AGENT_FINAL_MODEL_TIMEOUT_SECONDS", mode="before")
+        @classmethod
+        def validate_final_timeout(cls, value):
+            if isinstance(value, bool):
+                raise ValueError("INVALID_FINAL_MODEL_TIMEOUT")
+            return value
 
         # Paths (relative to PROJECT_ROOT or absolute)
         DATASET_PATH: str = Field(default="dataset/bottle", description="Path to MVTec AD bottle dataset")
@@ -154,6 +162,9 @@ except ImportError:
             self.AGENT_MAX_REPEAT_CALLS = int(os.getenv("AGENT_MAX_REPEAT_CALLS", "2"))
             self.AGENT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("AGENT_REQUEST_TIMEOUT_SECONDS", "60"))
             self.AGENT_MODEL_TIMEOUT_SECONDS = float(os.getenv("AGENT_MODEL_TIMEOUT_SECONDS", "15"))
+            self.AGENT_FINAL_MODEL_TIMEOUT_SECONDS = int(os.getenv("AGENT_FINAL_MODEL_TIMEOUT_SECONDS", "15"))
+            if not 1 <= self.AGENT_FINAL_MODEL_TIMEOUT_SECONDS <= 30:
+                raise ValueError("INVALID_FINAL_MODEL_TIMEOUT")
             self.AGENT_TOOL_TIMEOUT_SECONDS = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "3"))
             self.AGENT_MAX_PAYLOAD_BYTES = int(os.getenv("AGENT_MAX_PAYLOAD_BYTES", "65536"))
             self.DATASET_PATH = os.getenv("DATASET_PATH", "dataset/bottle")

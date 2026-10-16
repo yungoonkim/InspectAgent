@@ -17,6 +17,7 @@ from backend.agent.service import AgentFailure, AgentService, CORE_FIELDS, PRODU
 from backend.agent.tools import InspectionTools
 from backend.storage import InspectionStorageBase, JsonlInspectionStorage, StorageError
 from tests.test_agent_tools import make_log, make_record
+from tests.agent_error_fixtures import error_logs, error_record, with_error_facts
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +55,75 @@ def report_payload(record=None, summary="NORMAL_MODEL_RESULT"):
     }
 
 
+def report_response(payload):
+    """Translate legacy draft fixtures into the actual token wire protocol."""
+    def respond(**kwargs):
+        packet = json.loads(kwargs["contents"][0].parts[0].text)
+        tokens = {}
+        selected = []
+        for fact in payload["observed_facts"]:
+            token = next((entry["token"] for entry in packet["catalog"] if all(
+                entry[name] == fact.get(name) and (name != "observed_value"
+                    or type(entry[name]) is type(fact.get(name))) for name in
+                ("evidence_id", "source_tool", "source_field", "observed_value", "source_event")
+            )), "K9999")
+            tokens[fact["fact_id"]] = token
+            selected.append(token)
+        simple = {
+            "overall_summary": payload["overall_summary"], "observed_fact_refs": selected,
+            "possible_causes": [selection["cause_code"] + ":" + ",".join(tokens.get(reference, "K9999")
+                for reference in selection["evidence_refs"]) for selection in payload["possible_causes"]],
+            "recommended_checks": [selection["check_code"] + ":" + ",".join(tokens.get(reference, "K9999")
+                for reference in selection["evidence_refs"]) for selection in payload["recommended_checks"]],
+            "limitations": payload["limitations"],
+        }
+        for name in set(payload) - set(report_payload()):
+            simple[name] = payload[name]
+        if payload["inspection_id"] != packet["inspection_id"]:
+            simple["inspection_id"] = payload["inspection_id"]
+        response = text_response(json.dumps(simple))
+        response.usage_metadata = getattr(respond, "usage_metadata", None)
+        return response
+    return respond
+
+
+def with_quality_facts(payload, record, evidence_id="E0002"):
+    payload = copy.deepcopy(payload)
+    observations = {"/data/image_quality_status": record.image_quality_status,
+        **{f"/data/metrics/{name}": record.metrics.get(name) for name in ("mean", "std", "min", "max")},
+        "/data/threshold_status": "NOT_RECORDED"}
+    thresholds = record.metrics.get("applied_thresholds")
+    if thresholds:
+        observations["/data/threshold_status"] = "RECORDED"
+        observations.update({f"/data/brightness_thresholds/{name}": thresholds[name] for name in ("low_threshold", "high_threshold")})
+    present = {fact["source_field"] for fact in payload["observed_facts"] if fact["source_tool"] == "analyze_image_quality"}
+    for pointer, value in observations.items():
+        if pointer not in present:
+            payload["observed_facts"].append({"fact_id": f"F{len(payload['observed_facts']) + 1:04d}",
+                "evidence_id": evidence_id, "source_tool": "analyze_image_quality", "source_field": pointer,
+                "observed_value": value})
+    return payload
+
+
+def wire_transport(responses):
+    sequence = iter(responses)
+
+    async def send(method, path, body, options):
+        response = next(sequence)
+        if callable(response):
+            response = response(contents=[types.Content.model_validate(item) for item in body["contents"]])
+        payload = response.model_dump(mode="json", exclude_none=True)
+        candidate = payload["candidates"][0]
+        candidate["finishReason"] = candidate.pop("finish_reason")
+        for part in candidate["content"]["parts"]:
+            for source, target in (("function_call", "functionCall"), ("thought_signature", "thoughtSignature")):
+                if source in part:
+                    part[target] = part.pop(source)
+        return SimpleNamespace(body=json.dumps(payload), headers={})
+
+    return AsyncMock(side_effect=send)
+
+
 @pytest.fixture
 def storage():
     instance = Mock(spec=InspectionStorageBase)
@@ -64,7 +134,15 @@ def storage():
 
 
 def service_for(storage, responses, limits=None, **settings_override):
-    generator = AsyncMock(side_effect=responses)
+    sequence = iter(responses)
+
+    async def generate(**kwargs):
+        response = next(sequence)
+        if isinstance(response, Exception):
+            raise response
+        return response(**kwargs) if callable(response) else response
+
+    generator = AsyncMock(side_effect=generate)
     client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generator)))
     settings = SimpleNamespace(GEMINI_MODEL="gemini-mock", GEMINI_API_KEY=None, **settings_override)
     return AgentService(InspectionTools(storage), settings=settings, client=client, limits=limits or AgentLimits()), generator
@@ -77,7 +155,7 @@ def run_service(storage, responses, limits=None):
 
 def normal_responses(payload=None, *, continue_investigation=False):
     return [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
-            *([text_response()] if continue_investigation else []), text_response(json.dumps(payload or report_payload()))]
+            *([text_response()] if continue_investigation else []), report_response(payload or report_payload())]
 
 
 def test_declarations_are_exact_and_forbid_additional_arguments():
@@ -91,7 +169,7 @@ def test_declarations_are_exact_and_forbid_additional_arguments():
 
 def test_single_call_executes_python_and_supplies_report_evidence(storage):
     first = call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}), signature=b"opaque-signature")
-    result, generator = run_service(storage, [first, text_response(json.dumps(report_payload()))])
+    result, generator = run_service(storage, [first, report_response(report_payload())])
     assert result.analysis_status == "COMPLETED"
     assert result.tools_used == ["get_inspection_result"]
     trace = result.tool_execution_trace[0]
@@ -102,12 +180,11 @@ def test_single_call_executes_python_and_supplies_report_evidence(storage):
     next_contents = generator.call_args_list[1].kwargs["contents"]
     assert [item.role for item in next_contents] == ["user"]
     envelope = json.loads(next_contents[0].parts[0].text)
-    evidence = envelope["evidence"]["E0001"]
+    evidence = next(entry for entry in envelope["catalog"] if entry["source_field"] == "/data/result")
     assert evidence["source_tool"] == "get_inspection_result"
-    assert evidence["document"]["metadata"]["evidence_id"] == "E0001"
-    assert evidence["document"]["data"]["result"] == "OK"
-    assert "image_id" not in evidence["document"]["data"]
-    assert evidence["document"]["data"]["product_id"] == PRODUCT_ALIAS
+    assert evidence["evidence_id"] == "E0001"
+    assert evidence["observed_value"] == "OK"
+    assert all(not entry["source_field"].endswith(("/image_id", "/product_id")) for entry in envelope["catalog"])
     assert first.candidates[0].content.parts[0].thought_signature == b"opaque-signature"
     assert generator.call_args_list[0].kwargs["config"].automatic_function_calling.disable is True
     assert generator.call_args_list[0].kwargs["config"].http_options.retry_options.attempts == 1
@@ -127,7 +204,7 @@ def test_multiple_calls_and_rounds(storage, separate_rounds):
     first = ("get_inspection_result", {"inspection_id": "INSP-000001"})
     second = ("get_execution_logs", {"inspection_id": "INSP-000001"})
     responses = [call_response(first), call_response(second)] if separate_rounds else [call_response(first, second)]
-    result, generator = run_service(storage, responses + [text_response(), text_response(json.dumps(report_payload(record)))])
+    result, generator = run_service(storage, responses + [text_response(), report_response(report_payload(record))])
     assert result.analysis_status == "COMPLETED"
     assert result.tools_used == ["get_inspection_result", "get_execution_logs"]
     assert [entry.round_number for entry in result.tool_execution_trace] == ([1, 2] if separate_rounds else [1, 1])
@@ -141,7 +218,7 @@ def test_history_is_bound_to_record_product_and_only_alias_is_exposed(storage):
     result, generator = run_service(storage, [
         call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                       ("get_inspection_history", {"product_id": PRODUCT_ALIAS, "limit": 5})),
-        text_response(json.dumps(report_payload())),
+        report_response(report_payload()),
     ])
     assert result.analysis_status == "COMPLETED"
     storage.list_inspections.assert_called_once_with(limit=1000, product_id="PROD-T03-PRIVATE")
@@ -217,7 +294,7 @@ def test_missing_logs_are_returned_to_model_as_unavailable(storage):
     result, generator = run_service(storage, [
         call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                       ("get_execution_logs", {"inspection_id": "INSP-000001"})),
-        text_response(json.dumps(report_payload())),
+        report_response(report_payload()),
     ])
     assert result.analysis_status == "COMPLETED"
     assert result.tool_execution_trace[1].error_code == "DATA_UNAVAILABLE"
@@ -225,7 +302,7 @@ def test_missing_logs_are_returned_to_model_as_unavailable(storage):
     assert result.tools_used == ["get_inspection_result"]
     assert any("일부 판정" in text for text in result.limitations)
     envelope = json.loads(generator.call_args_list[-1].kwargs["contents"][0].parts[0].text)
-    assert list(envelope["evidence"]) == ["E0001"]
+    assert {entry["evidence_id"] for entry in envelope["catalog"]} == {"E0001"}
     assert envelope["tool_execution_trace"][1]["success"] is False
     assert envelope["tool_execution_trace"][1]["evidence_id"] is None
 
@@ -318,7 +395,7 @@ def test_unsupported_observations_and_actions_fail_deterministic_validation(stor
     elif mutation == "check":
         payload["recommended_checks"] = [{"check_code": "MODEL_SERVICE_CHECK", "evidence_refs": ["F0004"]}]
     result, generator = run_service(storage, normal_responses(payload))
-    assert result.error_code == "EVIDENCE_MISMATCH"
+    assert result.error_code == ("RESPONSE_SCHEMA_INVALID" if mutation in {"scope", "duplicate"} else "EVIDENCE_MISMATCH")
     assert result.observed_facts == []
 
 
@@ -342,12 +419,16 @@ def test_model_cannot_claim_fake_trace_or_tools(storage):
 def test_brightness_hypotheses_are_grounded_without_injection_information(storage):
     record = make_record(image_id="IMG-BOTTLE-INJ-0001", product_id="PROD-T03", image_quality_status="WARNING_LOW_BRIGHTNESS",
                          final_result="REINSPECT", final_reason_code="IMAGE_QUALITY_WARNING",
-                         metrics={"mean": 81.24, "synthetic": True, "injection_factor": 0.6})
+                         metrics={**make_record().metrics, "mean": 81.24, "synthetic": True, "injection_factor": 0.6})
     storage.get_inspection.return_value = record
     payload = report_payload(record, "REINSPECTION_REQUIRED")
     payload["possible_causes"] = [{"cause_code": "ILLUMINATION_CHANGE", "evidence_refs": ["F0003"]}]
     payload["recommended_checks"] = [{"check_code": "LIGHTING_EXPOSURE_CHECK", "evidence_refs": ["F0003"]}]
-    result, generator = run_service(storage, normal_responses(payload, continue_investigation=True))
+    payload = with_quality_facts(payload, record)
+    result, generator = run_service(storage, [
+        call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
+        call_response(("analyze_image_quality", {"inspection_id": "INSP-000001"})), report_response(payload),
+    ])
     assert result.analysis_status == "COMPLETED" and result.possible_causes[0].is_hypothesis is True
     context = json.dumps([content.model_dump(mode="json") for content in generator.call_args_list[-1].kwargs["contents"]])
     for forbidden in ("IMG-BOTTLE-INJ", "PROD-T03", "synthetic", "injection_factor", "ground_truth"):
@@ -356,13 +437,17 @@ def test_brightness_hypotheses_are_grounded_without_injection_information(storag
 
 
 def test_failed_inspection_query_is_successful_analysis_of_failure(storage):
-    record = make_record(status="FAILED", result="UNKNOWN", image_quality_status="ERROR", defect_detection_status="SKIPPED",
-                         final_result="ERROR", final_reason_code="INSPECTION_FAILED", anomaly_score=None)
+    record = error_record()
     storage.get_inspection.return_value = record
-    payload = report_payload(record, "INSPECTION_FAILED")
-    payload["possible_causes"] = [{"cause_code": "IMAGE_ACQUISITION", "evidence_refs": ["F0001", "F0003"]}]
-    payload["recommended_checks"] = [{"check_code": "IMAGE_REGISTRATION_ACCESS_CHECK", "evidence_refs": ["F0001", "F0003"]}]
-    result, generator = run_service(storage, normal_responses(payload, continue_investigation=True))
+    storage.get_logs.return_value = error_logs()
+    payload = with_error_facts(report_payload(record, "INSPECTION_FAILED"), record)
+    event = next(fact["fact_id"] for fact in payload["observed_facts"] if fact.get("source_event") == "IMAGE_LOAD_FAILED"
+        and fact["source_field"].endswith("/event_code"))
+    payload["possible_causes"] = [{"cause_code": "IMAGE_ACQUISITION", "evidence_refs": [event]}]
+    payload["recommended_checks"] = [{"check_code": "IMAGE_REGISTRATION_ACCESS_CHECK", "evidence_refs": [event]}]
+    result, generator = run_service(storage, [
+        call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})),
+        call_response(("get_execution_logs", {"inspection_id": "INSP-000001"})), report_response(payload)])
     assert result.analysis_status == "COMPLETED"
     assert result.inspection_snapshot["status"] == "FAILED"
     assert result.tool_execution_trace[0].success is True
@@ -405,7 +490,7 @@ def test_malicious_log_message_is_never_added_to_context(storage):
     result, generator = run_service(storage, [
         call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                       ("get_execution_logs", {"inspection_id": "INSP-000001"})),
-        text_response(json.dumps(report_payload())),
+        report_response(report_payload()),
     ])
     assert result.analysis_status == "COMPLETED"
     context = json.dumps([content.model_dump(mode="json") for content in generator.call_args_list[-1].kwargs["contents"]])
@@ -456,10 +541,10 @@ def test_log_evidence_event_is_verified(storage):
                                       "source_field": "/data/0/event_code", "source_event": "IMAGE_LOADED", "observed_value": "IMAGE_LOADED"})
     responses = [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                               ("get_execution_logs", {"inspection_id": "INSP-000001"}))]
-    result, generator = run_service(storage, responses + [text_response(json.dumps(payload))])
+    result, generator = run_service(storage, responses + [report_response(payload)])
     assert result.analysis_status == "COMPLETED"
     payload["observed_facts"][-1]["source_event"] = "IMAGE_LOAD_FAILED"
-    result, generator = run_service(storage, responses + [text_response(json.dumps(payload))])
+    result, generator = run_service(storage, responses + [report_response(payload)])
     assert result.error_code == "EVIDENCE_MISMATCH"
 
 
@@ -472,7 +557,7 @@ def test_history_fact_cannot_support_target_lighting_hypothesis(storage):
     result, generator = run_service(storage, [
         call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                       ("get_inspection_history", {"product_id": PRODUCT_ALIAS})),
-        text_response(json.dumps(payload)),
+        report_response(payload),
     ])
     assert result.error_code == "EVIDENCE_MISMATCH"
 
@@ -547,7 +632,7 @@ def test_complete_model_content_parts_and_final_turn_are_preserved(storage):
     first.candidates[0].content.parts.insert(2, types.Part(text="Offline context", thought_signature=b"synthetic-text-signature"))
     original = first.model_dump(mode="json")
     ready = text_response()
-    result, generator = run_service(storage, [first, ready, text_response(json.dumps(report_payload(record)))])
+    result, generator = run_service(storage, [first, ready, report_response(report_payload(record))])
     assert result.analysis_status == "COMPLETED"
     history = generator.call_args_list[1].kwargs["contents"]
     assert history[1] is first.candidates[0].content
@@ -558,7 +643,7 @@ def test_complete_model_content_parts_and_final_turn_are_preserved(storage):
     final_history = generator.call_args_list[-1].kwargs["contents"]
     assert [item.role for item in final_history] == ["user"]
     envelope = json.loads(final_history[0].parts[0].text)
-    assert list(envelope["evidence"]) == ["E0001", "E0002"]
+    assert {entry["evidence_id"] for entry in envelope["catalog"]} == {"E0001", "E0002"}
     assert "Offline reasoning" not in final_history[0].parts[0].text
     assert ready.candidates[0].content.parts[0].text not in final_history[0].parts[0].text
 
@@ -570,17 +655,7 @@ def test_actual_sdk_serializes_followup_without_network(storage):
     responses[0] = call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                                  ("get_execution_logs", {"inspection_id": "INSP-000001"}), signature=bytes(range(256)))
     service, generator = service_for(storage, [])
-    wire_responses = []
-    for response in responses:
-        body = response.model_dump(mode="json", exclude_none=True)
-        candidate = body["candidates"][0]
-        candidate["finishReason"] = candidate.pop("finish_reason")
-        for part in candidate["content"]["parts"]:
-            for source, target in (("function_call", "functionCall"), ("thought_signature", "thoughtSignature")):
-                if source in part:
-                    part[target] = part.pop(source)
-        wire_responses.append(SimpleNamespace(body=json.dumps(body), headers={}))
-    transport = AsyncMock(side_effect=wire_responses)
+    transport = wire_transport(responses)
     api_client = SimpleNamespace(vertexai=False, async_request=transport, _verify_response=Mock())
     service.client = SimpleNamespace(aio=SimpleNamespace(models=sdk_models.AsyncModels(api_client)))
     result = asyncio.run(service.analyze("INSP-000001"))
@@ -662,7 +737,7 @@ def test_multiple_rounds_retain_all_signatures_and_call_response_pairs(storage):
     first = call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}), signature=b"synthetic-first")
     second = call_response(("get_execution_logs", {"inspection_id": "INSP-000001"}), signature=b"synthetic-second")
     second.candidates[0].content.parts[0].function_call.id = "second-round-id"
-    result, generator = run_service(storage, [first, second, text_response(), text_response(json.dumps(report_payload(record)))])
+    result, generator = run_service(storage, [first, second, text_response(), report_response(report_payload(record))])
     assert result.analysis_status == "COMPLETED"
     history = generator.call_args_list[2].kwargs["contents"]
     assert [item.role for item in history] == ["user", "model", "user", "model", "user"]

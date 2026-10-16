@@ -18,6 +18,7 @@ from scripts.agent_simple_report_prototype import (
 )
 from tests.test_agent_service import call_response, service_for
 from tests.test_agent_tools import make_log, make_record
+from tests.agent_error_fixtures import error_logs, error_record, error_tokens
 
 
 @pytest.fixture(autouse=True)
@@ -35,9 +36,18 @@ def setup_report(changes=None, extra_tools=()):
     storage = Mock(spec=InspectionStorageBase)
     storage.get_inspection.return_value = make_record(**(changes or {}))
     storage.get_logs.return_value = [make_log(event_code="IMAGE_LOAD_FAILED")]
+    failed = storage.get_inspection.return_value.final_result == "ERROR"
+    if failed:
+        storage.get_inspection.return_value = error_record(**changes)
+        storage.get_logs.return_value = error_logs()
+        if "get_execution_logs" not in extra_tools:
+            extra_tools = (*extra_tools, "get_execution_logs")
     storage.list_inspections.return_value = [storage.get_inspection.return_value]
     service, generator = service_for(storage, [])
     state = RequestState("INSP-000001")
+    warning = storage.get_inspection.return_value.image_quality_status in {"WARNING_LOW_BRIGHTNESS", "WARNING_HIGH_BRIGHTNESS"}
+    if warning and "analyze_image_quality" not in extra_tools:
+        extra_tools = (*extra_tools, "analyze_image_quality")
 
     async def collect():
         for index, name in enumerate(("get_inspection_result", *extra_tools), 1):
@@ -53,6 +63,10 @@ def setup_report(changes=None, extra_tools=()):
     check = "CONTINUE_MONITORING" if state.snapshot["final_result"] == "OK" else "MANUAL_REINSPECTION"
     payload = {"overall_summary": summary, "observed_fact_refs": list(core.values()), "possible_causes": [],
                "recommended_checks": [check + ":" + core["final_result"]], "limitations": []}
+    if warning:
+        payload["observed_fact_refs"].extend(entry.token for entry in catalog.entries if entry.source_tool == "analyze_image_quality")
+    if failed:
+        payload["observed_fact_refs"].extend(error_tokens([entry.__dict__ for entry in catalog.entries]))
     return service, generator, state, catalog, payload, core, storage
 
 
@@ -83,8 +97,11 @@ def test_mock_conversion_preserves_pydantic_evidence_verdicts_trace_and_legacy_n
     assert result.inspection_snapshot["result"] == state.snapshot["result"]
     assert result.inspection_snapshot["final_result"] == state.snapshot["final_result"]
     assert result.inspection_snapshot["final_reason_code"] == state.snapshot["final_reason_code"]
-    assert all(fact.evidence_id == "E0001" for fact in result.observed_facts)
-    assert result.tool_execution_trace == state.trace and result.tools_used == ["get_inspection_result"]
+    expected_tools = ["get_inspection_result", *(["analyze_image_quality"] if changes and changes.get("image_quality_status") == "WARNING_LOW_BRIGHTNESS" else [])]
+    if state.snapshot["final_result"] == "ERROR":
+        expected_tools.append("get_execution_logs")
+    assert {fact.evidence_id for fact in result.observed_facts} == {entry.evidence_id for entry in state.trace}
+    assert result.tool_execution_trace == state.trace and result.tools_used == expected_tools
     assert (state.evidence, state.snapshot, state.trace) == before
     generator.assert_not_called()
     storage.save_inspection.assert_not_called()
@@ -183,6 +200,7 @@ def test_log_pointers_and_events_remain_grounded_in_the_executed_log_tool():
         {"status": "FAILED", "result": "UNKNOWN", "image_quality_status": "ERROR", "defect_detection_status": "SKIPPED",
          "final_result": "ERROR", "final_reason_code": "INSPECTION_FAILED"}, ("get_execution_logs",))
     event = next(entry for entry in catalog.entries if entry.source_tool == "get_execution_logs" and entry.source_field == "/data/0/event_code")
+    payload["observed_fact_refs"].remove(event.token)
     payload["observed_fact_refs"].append(event.token)
     payload["possible_causes"] = ["IMAGE_ACQUISITION:" + event.token]
     payload["recommended_checks"].append("IMAGE_REGISTRATION_ACCESS_CHECK:" + event.token)
@@ -228,13 +246,13 @@ def test_missing_or_forged_evidence_is_not_given_catalog_tokens():
     assert failure.value.code == "EVIDENCE_MISMATCH"
 
 
-def test_original_service_still_uses_its_full_schema_and_safe_failure_contract():
+def test_integrated_service_uses_simple_schema_and_safe_failure_contract():
     storage = Mock(spec=InspectionStorageBase)
     storage.get_inspection.return_value = make_record()
     failure = errors.ClientError(400, {"error": {"status": "INVALID_ARGUMENT", "message": "PRIVATE"}})
     service, generator = service_for(storage, [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"})), failure])
     result = asyncio.run(service.analyze("INSP-000001"))
     assert result.error_code == "GEMINI_REQUEST_FAILED" and generator.await_count == 2
-    assert generator.call_args_list[-1].kwargs["config"].response_json_schema != simple_output_schema()
+    assert generator.call_args_list[-1].kwargs["config"].response_json_schema == simple_output_schema()
     assert result.tools_used == ["get_inspection_result"]
     assert "PRIVATE" not in result.model_dump_json()

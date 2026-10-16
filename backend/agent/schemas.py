@@ -43,6 +43,7 @@ class AgentLimits(StrictModel):
     max_repeat_calls: int = Field(default=2, ge=1, le=3)
     request_timeout_seconds: float = Field(default=60, gt=0, le=180)
     model_timeout_seconds: float = Field(default=15, gt=0, le=60)
+    final_model_timeout_seconds: Annotated[StrictInt, Field(ge=1, le=30)] = 15
     tool_timeout_seconds: float = Field(default=3, gt=0, le=10)
     max_payload_bytes: int = Field(default=65536, ge=1024, le=262144)
     max_output_tokens: int = Field(default=4096, ge=256, le=8192)

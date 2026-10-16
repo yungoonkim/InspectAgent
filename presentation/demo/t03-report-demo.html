@@ -1,0 +1,1749 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionInsight — T03 밝기 경고 검사 및 Gemini AI 진단 데모 (INSP-001398)</title>
+  <style>
+    /* ==========================================================================
+       VisionInsight T03 Presentation Demo — 100% Self-Contained, Zero External CDN
+       ========================================================================== */
+    :root {
+      --bg-base: #0a0f1d;
+      --bg-surface: #131b2e;
+      --bg-surface-elevated: #1a243b;
+      --bg-surface-high: #22304d;
+      --bg-surface-sunken: #070b14;
+      --border-subtle: #1e293b;
+      --border-strong: #334155;
+      --border-focus: #f59e0b;
+      
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --primary: #f59e0b;
+      --primary-glow: rgba(245, 158, 11, 0.15);
+      --primary-contrast: #78350f;
+
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.15);
+      
+      --success: #34d399;
+      --success-bg: rgba(52, 211, 153, 0.12);
+      --success-border: rgba(52, 211, 153, 0.35);
+      
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.14);
+      --warning-border: rgba(245, 158, 11, 0.4);
+      
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.12);
+      --error-border: rgba(248, 113, 113, 0.35);
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      
+      --base-font-size: 14px;
+    }
+
+    [data-theme="light"] {
+      --bg-base: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-surface-elevated: #f1f5f9;
+      --bg-surface-high: #e2e8f0;
+      --bg-surface-sunken: #f8fafc;
+      --border-subtle: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --border-focus: #d97706;
+      
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      
+      --primary: #d97706;
+      --primary-glow: rgba(217, 119, 6, 0.12);
+      --primary-contrast: #fef3c7;
+
+      --cyan: #0284c7;
+      --cyan-glow: rgba(2, 132, 199, 0.12);
+      
+      --success: #059669;
+      --success-bg: rgba(5, 150, 105, 0.1);
+      --success-border: rgba(5, 150, 105, 0.3);
+      
+      --warning: #d97706;
+      --warning-bg: rgba(217, 119, 6, 0.12);
+      --warning-border: rgba(217, 119, 6, 0.4);
+      
+      --error: #dc2626;
+      --error-bg: rgba(220, 38, 38, 0.1);
+      --error-border: rgba(220, 38, 38, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: var(--base-font-size);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    /* Header & Disclaimer Banner */
+    header {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .header-content {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo-icon {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 18px;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+    }
+
+    .brand-titles h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-titles p {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .demo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--warning);
+    }
+
+    .demo-badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--warning);
+      box-shadow: 0 0 8px var(--warning);
+    }
+
+    .controls-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-ctrl {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .btn-ctrl:hover {
+      background: var(--bg-surface-high);
+      border-color: var(--border-focus);
+      color: var(--primary);
+    }
+
+    .btn-ctrl:active {
+      transform: translateY(1px);
+    }
+
+    .btn-tour {
+      background: var(--primary-glow);
+      color: var(--primary);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+
+    /* Top Disclaimer Banner */
+    .disclaimer-banner {
+      background: linear-gradient(90deg, rgba(217, 119, 6, 0.15) 0%, rgba(245, 158, 11, 0.1) 100%);
+      border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+      padding: 8px 24px;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .disclaimer-banner strong {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .disclaimer-tag {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--warning);
+      border: 1px solid var(--warning-border);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    /* Tour Step Bar */
+    .tour-bar {
+      max-width: 1520px;
+      margin: 14px auto 0;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+    }
+
+    .tour-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+
+    .tour-chip {
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .tour-chip:hover {
+      border-color: var(--border-focus);
+      color: var(--text-main);
+    }
+
+    .tour-chip.active {
+      background: var(--warning);
+      color: #3b1d02;
+      border-color: var(--warning);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.35);
+    }
+
+    /* Main Workspace Layout */
+    main {
+      max-width: 1520px;
+      margin: 16px auto;
+      padding: 0 24px 32px;
+      width: 100%;
+      flex: 1;
+    }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 1100px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      position: relative;
+    }
+
+    .card.highlighted {
+      border-color: var(--primary);
+      box-shadow: 0 0 24px var(--primary-glow);
+      transform: translateY(-2px);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+    }
+
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-surface-elevated);
+      color: var(--primary);
+    }
+
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .card-subtitle {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .layer-badge {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .layer-vision {
+      background: rgba(56, 189, 248, 0.12);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .layer-decision {
+      background: rgba(245, 158, 11, 0.14);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .layer-agent {
+      background: rgba(52, 211, 153, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+
+    /* Key-Value Details Grid */
+    .kv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .kv-item {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+    }
+
+    .kv-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kv-value {
+      font-size: 0.92rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-main);
+      word-break: break-all;
+    }
+
+    .kv-value.highlight-ok {
+      color: var(--success);
+    }
+
+    .kv-value.highlight-warning {
+      color: var(--warning);
+    }
+
+    .kv-value.highlight-cyan {
+      color: var(--cyan);
+    }
+
+    /* Final Verdict Banner (Amber Theme for REINSPECT) */
+    .verdict-banner-reinspect {
+      background: var(--warning-bg);
+      border: 1px solid var(--warning-border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .verdict-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .verdict-badge-reinspect {
+      background: var(--warning);
+      color: #3b1d02;
+      font-size: 1.15rem;
+      font-family: var(--font-mono);
+      font-weight: 900;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.05em;
+    }
+
+    .verdict-text h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .verdict-text p {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .verdict-rule-tag {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: var(--radius-sm);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    /* Anomaly Gauge Section */
+    .gauge-container {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .gauge-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .gauge-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .gauge-score {
+      font-size: 1.35rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      color: var(--success);
+    }
+
+    .gauge-bar-track {
+      position: relative;
+      height: 14px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: visible;
+      margin: 12px 0 20px;
+      border: 1px solid var(--border-strong);
+    }
+
+    .gauge-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #059669 0%, #34d399 100%);
+      border-radius: 999px;
+      transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .gauge-threshold-pin {
+      position: absolute;
+      top: -8px;
+      bottom: -8px;
+      width: 3px;
+      background: var(--error);
+      box-shadow: 0 0 10px var(--error);
+      z-index: 2;
+    }
+
+    .gauge-threshold-label {
+      position: absolute;
+      top: 20px;
+      transform: translateX(-50%);
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--error);
+      white-space: nowrap;
+    }
+
+    .gauge-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      margin-top: 14px;
+    }
+
+    .gauge-meta-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.73rem;
+      color: var(--text-muted);
+    }
+
+    /* Inspection Schematic Canvas / SVG */
+    .schematic-box {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .schematic-caption {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Gemini Report Presentation Box */
+    .gemini-summary-box {
+      background: linear-gradient(135deg, rgba(217, 119, 6, 0.1) 0%, rgba(245, 158, 11, 0.04) 100%);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .gemini-summary-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .gemini-tag {
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--warning);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gemini-summary-quote {
+      font-size: 0.96rem;
+      font-weight: 600;
+      line-height: 1.6;
+      color: var(--text-main);
+      padding-left: 12px;
+      border-left: 3px solid var(--warning);
+    }
+
+    /* Causes & Recommended Checks */
+    .causes-box, .checks-box {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px;
+    }
+
+    .cause-item, .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      margin-top: 8px;
+    }
+
+    .cause-icon {
+      color: var(--warning);
+      font-size: 1rem;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    .check-icon {
+      color: var(--cyan);
+      font-size: 1.1rem;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    .cause-content h4, .check-content h4 {
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .cause-content p, .check-content p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .evidence-ref-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--primary-glow);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      margin-top: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .evidence-ref-pill:hover {
+      background: var(--warning);
+      color: #3b1d02;
+      transform: scale(1.03);
+    }
+
+    /* Evidence Facts Table */
+    .facts-table-container {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+
+    .facts-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.78rem;
+    }
+
+    .facts-table th {
+      background: var(--bg-surface-elevated);
+      padding: 9px 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .facts-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      transition: background-color 0.15s ease;
+    }
+
+    .facts-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .facts-table tr:hover td {
+      background: var(--bg-surface-elevated);
+    }
+
+    .facts-table tr.fact-target td {
+      background: rgba(245, 158, 11, 0.22);
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    .receipt-box {
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+    }
+
+    /* Limitations List */
+    .limitations-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .limitation-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 12px;
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .limitation-item span.warn-icon {
+      color: var(--warning);
+      font-weight: bold;
+    }
+
+    /* Trace & Verification Pipeline (Bottom Section) */
+    .trace-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+
+    .pipeline-steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .pipeline-steps {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .pipeline-step {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      text-align: center;
+      position: relative;
+    }
+
+    .pipeline-step.step-pass {
+      border-color: var(--warning-border);
+      background: var(--warning-bg);
+    }
+
+    .step-number {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .step-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .step-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--warning);
+      color: #3b1d02;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 16px 24px;
+      background: var(--bg-surface);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1520px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 16px;
+    }
+
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-surface-high);
+      color: var(--text-main);
+      border: 1px solid var(--border-focus);
+      padding: 10px 18px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      font-size: 0.82rem;
+      display: none;
+      z-index: 200;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==========================================================================
+       Header & Presentation Controls
+       ========================================================================== -->
+  <header>
+    <div class="header-content">
+      <div class="brand-section">
+        <div class="brand-logo-icon">VI</div>
+        <div class="brand-titles">
+          <h1>VisionInsight <span class="demo-badge">T03 밝기 경고 검증 데모</span></h1>
+          <p>조도 이상 분리 및 서버 규칙 기반 재검사(REINSPECT) AI 진단 (INSP-001398)</p>
+        </div>
+      </div>
+
+      <div class="controls-section">
+        <button class="btn-ctrl" id="btn-font-dec" title="글자 크기 축소">A-</button>
+        <button class="btn-ctrl" id="btn-font-reset" title="글자 크기 초기화">기본</button>
+        <button class="btn-ctrl" id="btn-font-inc" title="글자 크기 확대">A+</button>
+        <button class="btn-ctrl" id="btn-theme-toggle" title="다크/라이트 테마 전환">
+          <span id="theme-icon">☀️</span> 테마 전환
+        </button>
+        <button class="btn-ctrl btn-tour" id="btn-copy-json" title="데모용 주요 필드 JSON 복사 (축약 객체)">
+          📋 데모용 주요 필드 JSON 복사
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Disclaimer Banner (Mandatory Notice) -->
+  <div class="disclaimer-banner">
+    <span class="disclaimer-tag">T03 VERIFIED</span>
+    <span>저장된 <strong>T03 실제 Gemini E2E 성공 결과</strong>를 재생하는 발표용 정적 데모입니다. <strong>현재 Gemini API를 호출하지 않습니다.</strong></span>
+  </div>
+
+  <!-- Tour Navigation Bar for Presenter -->
+  <div class="tour-bar">
+    <span class="tour-label">발표 시연 흐름:</span>
+    <button class="tour-chip active" data-step="all">전체 개요</button>
+    <button class="tour-chip" data-step="step1">1. PatchCore 검사 (OK)</button>
+    <button class="tour-chip" data-step="step2">2. 판정 규칙 (Rule 2 ➔ REINSPECT)</button>
+    <button class="tour-chip" data-step="step3">3. Gemini 진단 요약</button>
+    <button class="tour-chip" data-step="step4">4. Evidence 검증 (F0001~F0012)</button>
+    <button class="tour-chip" data-step="step5">5. 가설 & 재검사 권고</button>
+  </div>
+
+  <!-- ==========================================================================
+       Main Workspace
+       ========================================================================== -->
+  <main>
+    <div class="workspace-grid">
+
+      <!-- ======================================================================
+           LEFT COLUMN: Vision Inspection & Decision Layer (서버 확정 데이터)
+           ====================================================================== -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+
+        <!-- Card 1: 검사 메타데이터 및 영상 품질 경고 -->
+        <section class="card" id="card-meta">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: var(--warning);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">검사 메타데이터 및 조도 이상 감지</h2>
+                <p class="card-subtitle">서버 저장소(JsonlInspectionStorage) 확정 레코드</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-vision">Layer 1: Vision Data</span>
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">검사 식별자 (Inspection ID)</div>
+              <div class="kv-value highlight-cyan">INSP-001398</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">제품 ID (Product ID)</div>
+              <div class="kv-value">PROD-BOTTLE-T03</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">이미지 ID (Server Sanitized)</div>
+              <div class="kv-value">IMG-BOTTLE-INJ-0001</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">영상 품질 상태 (Quality Status)</div>
+              <div class="kv-value highlight-warning">WARNING_LOW_BRIGHTNESS</div>
+            </div>
+          </div>
+
+          <!-- Schematic Vector Visual (Low Brightness Concept) -->
+          <div class="schematic-box">
+            <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 0.7rem; font-weight: 700; color: var(--warning); background: rgba(245, 158, 11, 0.12); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--warning-border);">
+                ※ 개념도 — 실제 검사 이미지 아님 (규격·조도 통계 참고용)
+              </span>
+              <span style="font-size: 0.68rem; font-family: var(--font-mono); color: var(--text-dim);">900 × 900 Canvas</span>
+            </div>
+            <svg width="100%" height="150" viewBox="0 0 400 150" style="max-width: 400px;">
+              <!-- Background grid with low illumination tint -->
+              <defs>
+                <pattern id="grid-dark" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#grid-dark)" rx="8" />
+
+              <!-- Bottle Silhouette Concept Wireframe (Dimmed) -->
+              <path d="M 175 25 L 225 25 L 225 45 L 245 70 L 245 130 L 155 130 L 155 70 L 175 45 Z" 
+                    fill="rgba(245, 158, 11, 0.05)" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,2"/>
+              
+              <!-- Abstract Geometry Mark -->
+              <rect x="175" y="25" width="50" height="20" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="2,2" rx="2"/>
+              <text x="232" y="38" fill="#94a3b8" font-size="10" font-family="monospace">개념 외곽선</text>
+
+              <!-- Illumination Warning Indicator -->
+              <circle cx="155" cy="70" r="3" fill="#f59e0b"/>
+              <circle cx="245" cy="70" r="3" fill="#f59e0b"/>
+              <circle cx="155" cy="130" r="3" fill="#f59e0b"/>
+              <circle cx="245" cy="130" r="3" fill="#f59e0b"/>
+
+              <!-- Metrics Text -->
+              <text x="20" y="35" fill="#94a3b8" font-size="10" font-family="monospace">해상도: 900 × 900 px</text>
+              <text x="20" y="55" fill="#94a3b8" font-size="10" font-family="monospace">채널: 3 (RGB)</text>
+              <text x="20" y="75" fill="#f59e0b" font-size="10" font-family="monospace" font-weight="bold">평균 밝기: 81.24 (저하 경고)</text>
+              <text x="20" y="95" fill="#94a3b8" font-size="10" font-family="monospace">표준편차: 55.79</text>
+              <text x="20" y="115" fill="#94a3b8" font-size="10" font-family="monospace">동적범위: 18.0 ~ 153.0</text>
+            </svg>
+            <div class="schematic-caption">
+              <span>● 영상 품질: <strong style="color: var(--warning);">WARNING_LOW_BRIGHTNESS</strong> (조도 저하 감지)</span>
+              <span>● 결함 탐지: <strong>COMPLETED</strong></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Card 2: PatchCore 모델 이상치 탐지 결과 -->
+        <section class="card" id="card-patchcore">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: #38bdf8;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">PatchCore 이상치 탐지 결과 (모델 OK 판정)</h2>
+                <p class="card-subtitle">메모리 뱅크 최근접 이웃 거리 기반 비지도 이상 탐지</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-vision">Layer 1: Vision Inference</span>
+          </div>
+
+          <!-- Anomaly Gauge -->
+          <div class="gauge-container">
+            <div class="gauge-header">
+              <span class="gauge-title">PatchCore 이상 점수 (Anomaly Score)</span>
+              <span class="gauge-score">31.7779</span>
+            </div>
+
+            <!-- Visual Bar -->
+            <div class="gauge-bar-track">
+              <!-- Score Fill (31.7779 / 50.00 = 63.56%) -->
+              <div class="gauge-bar-fill" style="width: 63.56%;"></div>
+              <!-- Fixed Threshold Pin (34.1442 / 50.00 = 68.29%) -->
+              <div class="gauge-threshold-pin" style="left: 68.29%;">
+                <span class="gauge-threshold-label">임계값 34.1442</span>
+              </div>
+            </div>
+
+            <div class="gauge-scale">
+              <span>0.00 (표시 눈금)</span>
+              <span style="color: var(--success); font-weight: 700;">▲ 31.7779 (이상 점수 실측치)</span>
+              <span>50.00 (표시 눈금)</span>
+            </div>
+
+            <div class="gauge-meta-row">
+              <span>임계값 대비 마진: <strong style="color: var(--success);">-2.3663</strong> (임계값 미만 / 모델 OK 판정)</span>
+              <span>CPU 단일 추론 시간: <strong>42.72 ms</strong></span>
+            </div>
+          </div>
+
+          <div style="font-size: 0.71rem; color: var(--text-dim); margin-top: 6px; padding: 0 4px;">
+            ※ 0~50은 시각화를 위한 표시 눈금이며 PatchCore 이상 점수의 전체 범위나 결함 확률을 의미하지 않습니다.
+          </div>
+
+          <div style="font-size: 0.74rem; color: var(--text-muted); background: rgba(56, 189, 248, 0.05); padding: 8px 12px; border-radius: var(--radius-sm); border-left: 3px solid var(--cyan); line-height: 1.45; margin-top: 8px;">
+            ※ 이상 점수 31.7779가 고정 임계값 34.1442보다 낮아 PatchCore 모델은 OK로 판정했습니다. 다만 조도가 저하된 비정상 촬영 환경이므로 모델 판정만으로 제품의 실제 무결점을 보증할 수 없습니다.
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">모델 판정 (result)</div>
+              <div class="kv-value highlight-ok">OK (양품 판정)</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">규칙 기반 판정 신뢰도 (decision_confidence)</div>
+              <div class="kv-value highlight-warning">UNCERTAIN_DUE_TO_IMAGE_QUALITY</div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.70rem; color: var(--text-dim); padding: 0 4px; margin-top: 4px;">
+            ※ 영상 품질이 NORMAL이 아니므로 서버 규칙에 따라 판정 신뢰도에 UNCERTAIN_DUE_TO_IMAGE_QUALITY가 자동 부여되었습니다.
+          </div>
+        </section>
+
+        <!-- Card 3: 서버 규칙 기반 최종 검사 판정 (Rule 2 적용) -->
+        <section class="card" id="card-decision">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: var(--warning);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <polyline points="9 12 11 14 15 10"></polyline>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">서버 규칙 기반 최종 검사 판정 (재검사 분류)</h2>
+                <p class="card-subtitle">FastAPI Decision 계층의 6대 우선순위 규칙 집계</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-decision">Layer 2: Server Decision</span>
+          </div>
+
+          <!-- Final Verdict Banner (REINSPECT) -->
+          <div class="verdict-banner-reinspect">
+            <div class="verdict-left">
+              <div class="verdict-badge-reinspect">REINSPECT</div>
+              <div class="verdict-text">
+                <h3>재검사 필요 (IMAGE_QUALITY_WARNING)</h3>
+                <p>모델 OK 판정에도 불구하고 조도 저하로 인해 재검사로 안전 분류</p>
+              </div>
+            </div>
+            <div class="verdict-rule-tag">Rule 2 적용</div>
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">최종 판정 (final_result)</div>
+              <div class="kv-value highlight-warning">REINSPECT</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">최종 사유 코드 (final_reason_code)</div>
+              <div class="kv-value">IMAGE_QUALITY_WARNING</div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.76rem; color: var(--text-muted); background: var(--bg-surface-sunken); padding: 10px 14px; border-radius: var(--radius-sm); border-left: 3px solid var(--warning);">
+            💡 <strong>핵심 분리 원칙:</strong> 모델 판정은 OK였지만 영상 품질 경고를 반영하여 서버가 최종 판정을 <strong>재검사 필요(`REINSPECT`)</strong> 상태로 안전하게 분류했습니다. 실제 물리적인 제품 선별이나 배출기 제어는 수행하지 않으며, Gemini는 이 서버 판정을 변경할 수 없습니다.
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ======================================================================
+           RIGHT COLUMN: Gemini Agent & Evidence Verification (AI 진단 계층)
+           ====================================================================== -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+
+        <!-- Card 4: Gemini AI 진단 요약 및 원인 가설 -->
+        <section class="card" id="card-gemini">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: var(--warning);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">Gemini AI 근거 기반 진단 (T03 실서버 응답)</h2>
+                <p class="card-subtitle">gemini-3.8-flash (SDK 2.31.0) E2E 검증 통과</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-agent">Layer 3: AI Diagnosis</span>
+          </div>
+
+          <!-- Overall Summary Quote -->
+          <div class="gemini-summary-box">
+            <div class="gemini-summary-header">
+              <span class="gemini-tag">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+                AI 진단 종합 요약 (overall_summary)
+              </span>
+              <span style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--success); font-weight: 700;">analysis_status: COMPLETED</span>
+            </div>
+            <div class="gemini-summary-quote">
+              "기록된 종합 판정은 REINSPECT입니다. 제품 불량 확정과 구분하여 재검사가 필요합니다."
+            </div>
+          </div>
+
+          <!-- Possible Causes (Hypotheses) -->
+          <div class="causes-box">
+            <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+              추정 원인 가설 (possible_causes: 2건 — 물리적 고장 확정 아님)
+            </div>
+            <div class="cause-item">
+              <div class="cause-icon">💡</div>
+              <div class="cause-content">
+                <h4>ILLUMINATION_CHANGE</h4>
+                <p>촬영 조명 조건 변화 가능성이 있습니다. 물리적 고장은 확인되지 않았습니다.</p>
+                <button class="evidence-ref-pill btn-highlight-cause" data-facts="F0004,F0007" title="클릭 시 F0004, F0007 관측 사실 하이라이트">
+                  <span>근거 참조:</span>
+                  <strong>["F0004", "F0007"]</strong> ➔
+                </button>
+              </div>
+            </div>
+            <div class="cause-item">
+              <div class="cause-icon">📷</div>
+              <div class="cause-content">
+                <h4>EXPOSURE_SETTING</h4>
+                <p>카메라 노출 설정 변화 가능성이 있습니다. 카메라 고장은 확인되지 않았습니다.</p>
+                <button class="evidence-ref-pill btn-highlight-cause" data-facts="F0004,F0007" title="클릭 시 F0004, F0007 관측 사실 하이라이트">
+                  <span>근거 참조:</span>
+                  <strong>["F0004", "F0007"]</strong> ➔
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recommended Checks -->
+          <div class="checks-box">
+            <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+              권장 조치 (recommended_checks: 2건)
+            </div>
+            <div class="check-item">
+              <div class="check-icon">⚙️</div>
+              <div class="check-content">
+                <h4>LIGHTING_EXPOSURE_CHECK</h4>
+                <p>조명 조건과 카메라 노출 설정을 점검하세요.</p>
+                <button class="evidence-ref-pill btn-highlight-check" data-facts="F0004,F0007" title="클릭 시 F0004, F0007 하이라이트">
+                  <span>근거 참조:</span>
+                  <strong>["F0004", "F0007"]</strong> ➔
+                </button>
+              </div>
+            </div>
+            <div class="check-item">
+              <div class="check-icon">🔄</div>
+              <div class="check-content">
+                <h4>MANUAL_REINSPECTION</h4>
+                <p>기록된 판정 사유를 확인하고 정상 촬영 조건에서 수동 재검사하세요.</p>
+                <button class="evidence-ref-pill btn-highlight-check" data-facts="F0003" title="클릭 시 F0003 (REINSPECT) 하이라이트">
+                  <span>근거 참조:</span>
+                  <strong>["F0003"]</strong> ➔
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Card 5: Evidence 및 12개 Fact 참조 관계 -->
+        <section class="card" id="card-evidence">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: #34d399;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">Evidence & Fact 결정적 검증 관계 (12건)</h2>
+                <p class="card-subtitle">도구 2회 실행(E0001, E0002) 반환값과 모델 관측값의 1:1 결정적 검증</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-agent">PASS: 12/12 Verified</span>
+          </div>
+
+          <!-- Facts Table (12 Facts) -->
+          <div class="facts-table-container">
+            <table class="facts-table">
+              <thead>
+                <tr>
+                  <th>Fact ID</th>
+                  <th>Source Tool</th>
+                  <th>Source Field (JSON Pointer)</th>
+                  <th>Observed Value</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="fact-row-F0001">
+                  <td style="color: var(--cyan); font-weight: bold;">F0001</td>
+                  <td>get_inspection_result</td>
+                  <td>/data/defect_detection_status</td>
+                  <td>"COMPLETED"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0002">
+                  <td style="color: var(--cyan); font-weight: bold;">F0002</td>
+                  <td>get_inspection_result</td>
+                  <td>/data/final_reason_code</td>
+                  <td>"IMAGE_QUALITY_WARNING"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0003" style="border-left: 3px solid var(--warning);">
+                  <td style="color: var(--warning); font-weight: bold;">F0003 ⭐</td>
+                  <td>get_inspection_result</td>
+                  <td style="color: var(--warning);">/data/final_result</td>
+                  <td style="color: var(--warning); font-weight: bold;">"REINSPECT"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0004" style="border-left: 3px solid var(--warning);">
+                  <td style="color: var(--warning); font-weight: bold;">F0004 ⭐</td>
+                  <td>get_inspection_result</td>
+                  <td style="color: var(--warning);">/data/image_quality_status</td>
+                  <td style="color: var(--warning); font-weight: bold;">"WARNING_LOW_BRIGHTNESS"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0005">
+                  <td style="color: var(--cyan); font-weight: bold;">F0005</td>
+                  <td>get_inspection_result</td>
+                  <td>/data/result</td>
+                  <td>"OK"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0006">
+                  <td style="color: var(--cyan); font-weight: bold;">F0006</td>
+                  <td>get_inspection_result</td>
+                  <td>/data/status</td>
+                  <td>"COMPLETED"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-F0007" style="border-left: 3px solid var(--warning);">
+                  <td style="color: var(--warning); font-weight: bold;">F0007 ⭐</td>
+                  <td>analyze_image_quality</td>
+                  <td style="color: var(--warning);">/data/image_quality_status</td>
+                  <td style="color: var(--warning); font-weight: bold;">"WARNING_LOW_BRIGHTNESS"</td>
+                  <td>E0002</td>
+                </tr>
+                <tr id="fact-row-F0008">
+                  <td style="color: var(--cyan); font-weight: bold;">F0008</td>
+                  <td>analyze_image_quality</td>
+                  <td>/data/metrics/max</td>
+                  <td>153.0</td>
+                  <td>E0002</td>
+                </tr>
+                <tr id="fact-row-F0009" style="border-left: 3px solid var(--warning);">
+                  <td style="color: var(--warning); font-weight: bold;">F0009</td>
+                  <td>analyze_image_quality</td>
+                  <td>/data/metrics/mean</td>
+                  <td style="color: var(--warning); font-weight: bold;">81.24</td>
+                  <td>E0002</td>
+                </tr>
+                <tr id="fact-row-F0010">
+                  <td style="color: var(--cyan); font-weight: bold;">F0010</td>
+                  <td>analyze_image_quality</td>
+                  <td>/data/metrics/min</td>
+                  <td>18.0</td>
+                  <td>E0002</td>
+                </tr>
+                <tr id="fact-row-F0011" style="border-left: 3px solid var(--warning);">
+                  <td style="color: var(--warning); font-weight: bold;">F0011</td>
+                  <td>analyze_image_quality</td>
+                  <td>/data/metrics/std</td>
+                  <td style="color: var(--warning); font-weight: bold;">55.79</td>
+                  <td>E0002</td>
+                </tr>
+                <tr id="fact-row-F0012">
+                  <td style="color: var(--dim); font-weight: bold;">F0012</td>
+                  <td>analyze_image_quality</td>
+                  <td>/data/threshold_status</td>
+                  <td>"NOT_RECORDED"</td>
+                  <td>E0002</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tool Execution Receipts (E0001 & E0002) -->
+          <div class="receipt-box">
+            <div>
+              <strong style="color: var(--cyan);">Evidence ID: E0001</strong> (서버가 발급한 도구 실행 영수증)
+              <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">
+                도구: <code>get_inspection_result(inspection_id="INSP-001398")</code>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <span style="color: var(--success); font-weight: 700;">실행 성공 (2.402ms)</span>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">6개 Core Fact 매핑</div>
+            </div>
+          </div>
+
+          <div class="receipt-box">
+            <div>
+              <strong style="color: var(--warning);">Evidence ID: E0002</strong> (서버가 발급한 도구 실행 영수증)
+              <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">
+                도구: <code>analyze_image_quality(inspection_id="INSP-001398")</code>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <span style="color: var(--success); font-weight: 700;">실행 성공 (3.030ms)</span>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">6개 품질 Fact 매핑 (조기종료)</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Card 6: 진단 한계 고지 -->
+        <section class="card" id="card-limitations">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: var(--warning);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">진단 한계 및 안전 고지 (limitations: 4건)</h2>
+                <p class="card-subtitle">서버 안전 정책에 따라 필수 포함된 한계 항목</p>
+              </div>
+            </div>
+            <span class="layer-badge" style="background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border);">안전 가드</span>
+          </div>
+
+          <div class="limitations-list">
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>MODEL_NOT_GUARANTEE:</strong> 모델의 OK 판정은 실제 무결점 제품을 보증하지 않습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>UNKNOWN_PHYSICAL_CAUSE:</strong> 검사 기록만으로 물리적 장애 원인을 확정할 수 없습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>MISSING_BRIGHTNESS_THRESHOLDS:</strong> 검사 당시 밝기 기준치가 확인되지 않아 현재 설정으로 대체하지 않았습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>NO_PROBABILITY_CALIBRATION:</strong> 규칙 기반 판정 신뢰도는 보정된 확률이나 100% 신뢰도를 뜻하지 않습니다.
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- ======================================================================
+         BOTTOM FULL WIDTH: Execution Trace & Reliability Verification
+         ====================================================================== -->
+    <section class="trace-section" id="card-trace">
+      <div class="card-header">
+        <div class="card-title-group">
+          <div class="card-icon" style="color: var(--warning);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+          </div>
+          <div>
+            <h2 class="card-title">실제 T03 E2E 검증 Trace 및 계측 지표 (t03_operational_final30_1)</h2>
+            <p class="card-subtitle">FastAPI ASGI In-Process 라우트 호출 실측치 (2026-10-16T05:22:36 UTC)</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <span class="layer-badge" style="background: rgba(245, 158, 11, 0.15); color: var(--warning);">전체 소요: 24,600.29 ms (~24.60초)</span>
+          <span class="layer-badge" style="background: rgba(52, 211, 153, 0.15); color: var(--success);">총 토큰: 9,873 tokens</span>
+        </div>
+      </div>
+
+      <div class="pipeline-steps">
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 1 (2,441ms)</div>
+          <div class="step-title">Function Calling 1</div>
+          <span class="step-badge">HTTP 200</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">get_inspection_result (E0001)</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 2 (3,056ms)</div>
+          <div class="step-title">Function Calling 2</div>
+          <span class="step-badge">HTTP 200</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">analyze_image_quality (E0002)</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 3 (18,967ms)</div>
+          <div class="step-title">단순화된 JSON 생성</div>
+          <span class="step-badge">HTTP 200</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">최종 상한 30초 회차 실서버 성공</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 4 (0.52ms)</div>
+          <div class="step-title">Pydantic 검증</div>
+          <span class="step-badge">PASS</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">SimpleReport ➔ Draft</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 5 (1.45ms)</div>
+          <div class="step-title">Evidence 결정적 검증</div>
+          <span class="step-badge">12/12 일치</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">판정 불변 보존 (OK/REINSPECT)</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==========================================================================
+       Footer
+       ========================================================================== -->
+  <footer>
+    <div>
+      <strong>VisionInsight Project</strong> — 2026.10.20 기술 발표 데모 패키지 (T03 시나리오)
+    </div>
+    <div class="footer-links">
+      <span>검증 환경: Python 3.11 / FastAPI / PatchCore / Gemini 3.8 Flash</span>
+      <span>•</span>
+      <span>외부 API 호출: <strong>0회</strong> (정적 데이터 재생)</span>
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div class="toast-msg" id="toast">알림 메시지</div>
+
+  <!-- ==========================================================================
+       Embedded JavaScript (Zero External Dependencies)
+       ========================================================================== -->
+  <script>
+    (function() {
+      // 1. Theme Toggle
+      const themeToggleBtn = document.getElementById('btn-theme-toggle');
+      const themeIcon = document.getElementById('theme-icon');
+      const htmlEl = document.documentElement;
+
+      themeToggleBtn.addEventListener('click', function() {
+        const currentTheme = htmlEl.getAttribute('data-theme');
+        const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        htmlEl.setAttribute('data-theme', nextTheme);
+        themeIcon.textContent = nextTheme === 'dark' ? '☀️' : '🌙';
+        showToast(nextTheme === 'dark' ? '다크 모드로 전환되었습니다.' : '라이트 모드로 전환되었습니다.');
+      });
+
+      // 2. Font Zoom Controls
+      let currentZoom = 14;
+      const fontIncBtn = document.getElementById('btn-font-inc');
+      const fontDecBtn = document.getElementById('btn-font-dec');
+      const fontResetBtn = document.getElementById('btn-font-reset');
+
+      fontIncBtn.addEventListener('click', function() {
+        if (currentZoom < 18) {
+          currentZoom += 1;
+          document.body.style.setProperty('--base-font-size', currentZoom + 'px');
+          showToast(`글자 크기: ${currentZoom}px`);
+        }
+      });
+
+      fontDecBtn.addEventListener('click', function() {
+        if (currentZoom > 12) {
+          currentZoom -= 1;
+          document.body.style.setProperty('--base-font-size', currentZoom + 'px');
+          showToast(`글자 크기: ${currentZoom}px`);
+        }
+      });
+
+      fontResetBtn.addEventListener('click', function() {
+        currentZoom = 14;
+        document.body.style.setProperty('--base-font-size', '14px');
+        showToast('글자 크기가 기본값(14px)으로 복원되었습니다.');
+      });
+
+      // 3. Highlight Fact Row from Evidence Ref buttons
+      function highlightFacts(factIds) {
+        document.querySelectorAll('.facts-table tr').forEach(r => r.classList.remove('fact-target'));
+        const ids = factIds.split(',');
+        let firstEl = null;
+        ids.forEach(id => {
+          const row = document.getElementById('fact-row-' + id.trim());
+          if (row) {
+            row.classList.add('fact-target');
+            if (!firstEl) firstEl = row;
+          }
+        });
+        if (firstEl) {
+          firstEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        showToast(`관측 사실 [${factIds}] 이 하이라이트되었습니다.`);
+      }
+
+      document.querySelectorAll('.btn-highlight-cause, .btn-highlight-check').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const facts = this.getAttribute('data-facts');
+          highlightFacts(facts);
+        });
+      });
+
+      // Click on table row directly
+      document.querySelectorAll('.facts-table tbody tr').forEach(row => {
+        row.addEventListener('click', function() {
+          document.querySelectorAll('.facts-table tr').forEach(r => r.classList.remove('fact-target'));
+          this.classList.add('fact-target');
+          const factId = this.querySelector('td').textContent.trim();
+          showToast(`Fact [${factId}] 선택: 서버 부여 Evidence 영수증과 100% 결정적 검증 완료.`);
+        });
+      });
+
+      // 4. Tour Navigation / Step Highlighter
+      const tourChips = document.querySelectorAll('.tour-chip');
+      const allCards = document.querySelectorAll('.card, .trace-section');
+
+      tourChips.forEach(chip => {
+        chip.addEventListener('click', function() {
+          tourChips.forEach(c => c.classList.remove('active'));
+          this.classList.add('active');
+
+          const step = this.getAttribute('data-step');
+          allCards.forEach(card => card.classList.remove('highlighted'));
+
+          if (step === 'all') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast('전체 검사 및 진단 아키텍처 개요');
+          } else if (step === 'step1') {
+            const el = document.getElementById('card-patchcore');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 1: PatchCore 이상 점수 31.7779 (임계값 34.1442 미만 ➔ 모델 OK)');
+          } else if (step === 'step2') {
+            const el = document.getElementById('card-decision');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 2: 서버 규칙 2 적용 ➔ 최종 판정 REINSPECT (IMAGE_QUALITY_WARNING)');
+          } else if (step === 'step3') {
+            const el = document.getElementById('card-gemini');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 3: Gemini 3.8 Flash 재검사 권고 요약 (REINSPECTION_REQUIRED)');
+          } else if (step === 'step4') {
+            const el = document.getElementById('card-evidence');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 4: 도구 2회 실행(E0001, E0002) 및 12개 Fact 1:1 결정적 검증');
+          } else if (step === 'step5') {
+            const el = document.getElementById('card-limitations');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 5: 조명/노출 가설 2건, 재검사 권고 2건 및 4대 한계 고지');
+          }
+        });
+      });
+
+      // 5. Copy JSON (데모용 주요 필드 축약 객체)
+      const copyJsonBtn = document.getElementById('btn-copy-json');
+      const t03DemoJson = {
+        "scenario": "T03",
+        "inspection_id": "INSP-001398",
+        "analysis_status": "COMPLETED",
+        "error_code": null,
+        "inspection_result": "OK",
+        "final_result": "REINSPECT",
+        "final_reason_code": "IMAGE_QUALITY_WARNING",
+        "overall_summary": "기록된 종합 판정은 REINSPECT입니다. 제품 불량 확정과 구분하여 재검사가 필요합니다.",
+        "observed_facts": [
+          {"fact_id": "F0001", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/defect_detection_status", "observed_value": "COMPLETED"},
+          {"fact_id": "F0002", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/final_reason_code", "observed_value": "IMAGE_QUALITY_WARNING"},
+          {"fact_id": "F0003", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/final_result", "observed_value": "REINSPECT"},
+          {"fact_id": "F0004", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/image_quality_status", "observed_value": "WARNING_LOW_BRIGHTNESS"},
+          {"fact_id": "F0005", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/result", "observed_value": "OK"},
+          {"fact_id": "F0006", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/status", "observed_value": "COMPLETED"},
+          {"fact_id": "F0007", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/image_quality_status", "observed_value": "WARNING_LOW_BRIGHTNESS"},
+          {"fact_id": "F0008", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/metrics/max", "observed_value": 153.0},
+          {"fact_id": "F0009", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/metrics/mean", "observed_value": 81.24},
+          {"fact_id": "F0010", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/metrics/min", "observed_value": 18.0},
+          {"fact_id": "F0011", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/metrics/std", "observed_value": 55.79},
+          {"fact_id": "F0012", "evidence_id": "E0002", "source_tool": "analyze_image_quality", "source_field": "/data/threshold_status", "observed_value": "NOT_RECORDED"}
+        ],
+        "possible_causes": [
+          {"cause_code": "ILLUMINATION_CHANGE", "statement": "촬영 조명 조건 변화 가능성이 있습니다. 물리적 고장은 확인되지 않았습니다.", "evidence_refs": ["F0004", "F0007"]},
+          {"cause_code": "EXPOSURE_SETTING", "statement": "카메라 노출 설정 변화 가능성이 있습니다. 카메라 고장은 확인되지 않았습니다.", "evidence_refs": ["F0004", "F0007"]}
+        ],
+        "recommended_checks": [
+          {"check_code": "LIGHTING_EXPOSURE_CHECK", "instruction": "조명 조건과 카메라 노출 설정을 점검하세요.", "evidence_refs": ["F0004", "F0007"]},
+          {"check_code": "MANUAL_REINSPECTION", "instruction": "기록된 판정 사유를 확인하고 정상 촬영 조건에서 수동 재검사하세요.", "evidence_refs": ["F0003"]}
+        ],
+        "limitations": [
+          "모델의 OK 판정은 실제 무결점 제품을 보증하지 않습니다.",
+          "검사 기록만으로 물리적 장애 원인을 확정할 수 없습니다.",
+          "검사 당시 밝기 기준치가 확인되지 않아 현재 설정으로 대체하지 않았습니다.",
+          "규칙 기반 판정 신뢰도는 보정된 확률이나 100% 신뢰도를 뜻하지 않습니다."
+        ],
+        "inspection_snapshot": {
+          "status": "COMPLETED",
+          "result": "OK",
+          "image_quality_status": "WARNING_LOW_BRIGHTNESS",
+          "defect_detection_status": "COMPLETED",
+          "final_result": "REINSPECT",
+          "final_reason_code": "IMAGE_QUALITY_WARNING",
+          "anomaly_score": 31.777860641479492,
+          "decision_threshold": 34.1442
+        },
+        "tools_used": ["get_inspection_result", "analyze_image_quality"]
+      };
+
+      copyJsonBtn.addEventListener('click', function() {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(JSON.stringify(t03DemoJson, null, 2)).then(() => {
+            showToast('데모용 주요 필드 JSON(축약 데이터)이 클립보드에 복사되었습니다.');
+          }).catch(() => {
+            fallbackCopy(JSON.stringify(t03DemoJson, null, 2));
+          });
+        } else {
+          fallbackCopy(JSON.stringify(t03DemoJson, null, 2));
+        }
+      });
+
+      function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('데모용 주요 필드 JSON(축약 데이터)이 클립보드에 복사되었습니다.');
+      }
+
+      // Toast helper
+      const toastEl = document.getElementById('toast');
+      let toastTimer = null;
+      function showToast(msg) {
+        if (toastTimer) clearTimeout(toastTimer);
+        toastEl.textContent = msg;
+        toastEl.style.display = 'block';
+        toastTimer = setTimeout(() => {
+          toastEl.style.display = 'none';
+        }, 2500);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -13,7 +13,8 @@ from backend.agent.diagnostics import safe_gemini_error
 from backend.agent.prompts import REPORT_SYSTEM_INSTRUCTION
 from backend.agent.schemas import DiagnosisDraft, diagnosis_response_json_schema
 from backend.storage import InspectionStorageBase
-from tests.test_agent_service import call_response, normal_responses, service_for
+from tests.test_agent_service import call_response, normal_responses, service_for, wire_transport
+from backend.agent.reporting import simple_output_schema
 from tests.test_agent_tools import make_record
 
 
@@ -149,16 +150,7 @@ def test_actual_sdk_final_request_options_and_api_version_are_offline_only():
     storage = Mock(spec=InspectionStorageBase)
     storage.get_inspection.return_value = make_record()
     service, generator = service_for(storage, [])
-    wire_responses = []
-    for response in normal_responses():
-        body = response.model_dump(mode="json", exclude_none=True)
-        candidate = body["candidates"][0]
-        candidate["finishReason"] = candidate.pop("finish_reason")
-        for part in candidate["content"]["parts"]:
-            if "function_call" in part:
-                part["functionCall"] = part.pop("function_call")
-        wire_responses.append(SimpleNamespace(body=json.dumps(body), headers={}))
-    transport = AsyncMock(side_effect=wire_responses)
+    transport = wire_transport(normal_responses())
     api_client = SimpleNamespace(vertexai=False, async_request=transport, _verify_response=Mock())
     service.client = SimpleNamespace(aio=SimpleNamespace(models=sdk_models.AsyncModels(api_client)))
     result = asyncio.run(service.analyze("INSP-000001"))
@@ -177,7 +169,7 @@ def test_actual_sdk_final_request_options_and_api_version_are_offline_only():
     assert set(body["contents"][0]["parts"][0]) == {"text"}
     assert body["generationConfig"] == {
         "temperature": 0, "candidateCount": 1, "maxOutputTokens": 4096,
-        "responseMimeType": "application/json", "responseJsonSchema": diagnosis_response_json_schema(),
+        "responseMimeType": "application/json", "responseJsonSchema": simple_output_schema(),
     }
     assert body["systemInstruction"]["parts"][0]["text"] == REPORT_SYSTEM_INSTRUCTION
     assert options.timeout == 15000 and options.retry_options.attempts == 1

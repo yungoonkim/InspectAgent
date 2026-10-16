@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionInsight — T01 검사 결과 및 Gemini AI 진단 데모 (INSP-001396)</title>
+  <style>
+    /* ==========================================================================
+       VisionInsight Presentation Demo — 100% Self-Contained, Zero External CDN
+       ========================================================================== */
+    :root {
+      --bg-base: #0a0f1d;
+      --bg-surface: #131b2e;
+      --bg-surface-elevated: #1a243b;
+      --bg-surface-high: #22304d;
+      --bg-surface-sunken: #070b14;
+      --border-subtle: #1e293b;
+      --border-strong: #334155;
+      --border-focus: #38bdf8;
+      
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.15);
+      --primary-contrast: #0369a1;
+      
+      --success: #34d399;
+      --success-bg: rgba(52, 211, 153, 0.12);
+      --success-border: rgba(52, 211, 153, 0.35);
+      
+      --warning: #fbbf24;
+      --warning-bg: rgba(251, 191, 36, 0.12);
+      --warning-border: rgba(251, 191, 36, 0.35);
+      
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.12);
+      --error-border: rgba(248, 113, 113, 0.35);
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      
+      --base-font-size: 14px;
+    }
+
+    [data-theme="light"] {
+      --bg-base: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-surface-elevated: #f1f5f9;
+      --bg-surface-high: #e2e8f0;
+      --bg-surface-sunken: #f8fafc;
+      --border-subtle: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --border-focus: #0284c7;
+      
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      
+      --primary: #0284c7;
+      --primary-glow: rgba(2, 132, 199, 0.12);
+      --primary-contrast: #e0f2fe;
+      
+      --success: #059669;
+      --success-bg: rgba(5, 150, 105, 0.1);
+      --success-border: rgba(5, 150, 105, 0.3);
+      
+      --warning: #d97706;
+      --warning-bg: rgba(217, 119, 6, 0.1);
+      --warning-border: rgba(217, 119, 6, 0.3);
+      
+      --error: #dc2626;
+      --error-bg: rgba(220, 38, 38, 0.1);
+      --error-border: rgba(220, 38, 38, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: var(--base-font-size);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    /* ==========================================================================
+       Header & Disclaimer Banner
+       ========================================================================== */
+    header {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .header-content {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo-icon {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 18px;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+    }
+
+    .brand-titles h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-titles p {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .demo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--primary);
+    }
+
+    .demo-badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    /* Presentation Controls */
+    .controls-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-ctrl {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .btn-ctrl:hover {
+      background: var(--bg-surface-high);
+      border-color: var(--border-focus);
+      color: var(--primary);
+    }
+
+    .btn-ctrl:active {
+      transform: translateY(1px);
+    }
+
+    .btn-tour {
+      background: var(--primary-glow);
+      color: var(--primary);
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+
+    /* Top Disclaimer Banner */
+    .disclaimer-banner {
+      background: linear-gradient(90deg, rgba(2, 132, 199, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%);
+      border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 8px 24px;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .disclaimer-banner strong {
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .disclaimer-tag {
+      background: rgba(251, 191, 36, 0.15);
+      color: var(--warning);
+      border: 1px solid var(--warning-border);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    /* Tour Step Bar */
+    .tour-bar {
+      max-width: 1520px;
+      margin: 14px auto 0;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+    }
+
+    .tour-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+
+    .tour-chip {
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .tour-chip:hover {
+      border-color: var(--border-focus);
+      color: var(--text-main);
+    }
+
+    .tour-chip.active {
+      background: var(--primary);
+      color: #032541;
+      border-color: var(--primary);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+    }
+
+    /* ==========================================================================
+       Main Workspace Layout
+       ========================================================================== */
+    main {
+      max-width: 1520px;
+      margin: 16px auto;
+      padding: 0 24px 32px;
+      width: 100%;
+      flex: 1;
+    }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 1100px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      position: relative;
+    }
+
+    .card.highlighted {
+      border-color: var(--primary);
+      box-shadow: 0 0 24px var(--primary-glow);
+      transform: translateY(-2px);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+    }
+
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-surface-elevated);
+      color: var(--primary);
+    }
+
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .card-subtitle {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .layer-badge {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .layer-vision {
+      background: rgba(56, 189, 248, 0.12);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .layer-decision {
+      background: rgba(168, 85, 247, 0.12);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+
+    .layer-agent {
+      background: rgba(52, 211, 153, 0.12);
+      color: #34d399;
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+
+    /* Key-Value Details Grid */
+    .kv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .kv-item {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+    }
+
+    .kv-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kv-value {
+      font-size: 0.92rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-main);
+      word-break: break-all;
+    }
+
+    .kv-value.highlight-ok {
+      color: var(--success);
+    }
+
+    .kv-value.highlight-cyan {
+      color: var(--primary);
+    }
+
+    /* Verdict Banner */
+    .verdict-banner {
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .verdict-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .verdict-badge {
+      background: var(--success);
+      color: #032b1c;
+      font-size: 1.15rem;
+      font-family: var(--font-mono);
+      font-weight: 900;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.05em;
+    }
+
+    .verdict-text h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .verdict-text p {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .verdict-rule-tag {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* Anomaly Gauge Section */
+    .gauge-container {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .gauge-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .gauge-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .gauge-score {
+      font-size: 1.35rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      color: var(--success);
+    }
+
+    .gauge-bar-track {
+      position: relative;
+      height: 14px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: visible;
+      margin: 12px 0 20px;
+      border: 1px solid var(--border-strong);
+    }
+
+    .gauge-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #059669 0%, #34d399 100%);
+      border-radius: 999px;
+      transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .gauge-threshold-pin {
+      position: absolute;
+      top: -8px;
+      bottom: -8px;
+      width: 3px;
+      background: var(--error);
+      box-shadow: 0 0 10px var(--error);
+      z-index: 2;
+    }
+
+    .gauge-threshold-label {
+      position: absolute;
+      top: 20px;
+      transform: translateX(-50%);
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--error);
+      white-space: nowrap;
+    }
+
+    .gauge-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      margin-top: 14px;
+    }
+
+    .gauge-meta-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.73rem;
+      color: var(--text-muted);
+    }
+
+    /* Inspection Schematic Canvas / SVG */
+    .schematic-box {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .schematic-caption {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Gemini Report Presentation Box */
+    .gemini-summary-box {
+      background: linear-gradient(135deg, rgba(2, 132, 199, 0.1) 0%, rgba(56, 189, 248, 0.04) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .gemini-summary-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .gemini-tag {
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gemini-summary-quote {
+      font-size: 0.96rem;
+      font-weight: 600;
+      line-height: 1.6;
+      color: var(--text-main);
+      padding-left: 12px;
+      border-left: 3px solid var(--primary);
+    }
+
+    /* Recommended Checks */
+    .checks-box {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 14px;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      margin-top: 8px;
+    }
+
+    .check-icon {
+      color: var(--success);
+      font-size: 1.1rem;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    .check-content h4 {
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .check-content p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .evidence-ref-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--primary-glow);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      margin-top: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .evidence-ref-pill:hover {
+      background: var(--primary);
+      color: #032541;
+      transform: scale(1.03);
+    }
+
+    /* Evidence Facts Table */
+    .facts-table-container {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .facts-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.78rem;
+    }
+
+    .facts-table th {
+      background: var(--bg-surface-elevated);
+      padding: 10px 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .facts-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      transition: background-color 0.15s ease;
+    }
+
+    .facts-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .facts-table tr:hover td {
+      background: var(--bg-surface-elevated);
+    }
+
+    .facts-table tr.fact-target td {
+      background: rgba(56, 189, 248, 0.18);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .receipt-box {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+    }
+
+    /* Limitations List */
+    .limitations-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .limitation-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 12px;
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    .limitation-item span.warn-icon {
+      color: var(--warning);
+      font-weight: bold;
+    }
+
+    /* Trace & Verification Pipeline (Bottom Section) */
+    .trace-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+
+    .pipeline-steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .pipeline-steps {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .pipeline-step {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      text-align: center;
+      position: relative;
+    }
+
+    .pipeline-step.step-pass {
+      border-color: var(--success-border);
+      background: var(--success-bg);
+    }
+
+    .step-number {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .step-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .step-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--success);
+      color: #032b1c;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 16px 24px;
+      background: var(--bg-surface);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1520px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 16px;
+    }
+
+    .footer-links a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    .footer-links a:hover {
+      text-decoration: underline;
+    }
+
+    /* Interactive Tooltip / Notification */
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-surface-high);
+      color: var(--text-main);
+      border: 1px solid var(--border-focus);
+      padding: 10px 18px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      font-size: 0.82rem;
+      display: none;
+      z-index: 200;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==========================================================================
+       Header & Presentation Controls
+       ========================================================================== -->
+  <header>
+    <div class="header-content">
+      <div class="brand-section">
+        <div class="brand-logo-icon">VI</div>
+        <div class="brand-titles">
+          <h1>VisionInsight <span class="demo-badge">T01 검증 데이터 데모</span></h1>
+          <p>MVTec AD Bottle 기반 산업용 Vision 검사 이상 진단 AI Agent (INSP-001396)</p>
+        </div>
+      </div>
+
+      <div class="controls-section">
+        <button class="btn-ctrl" id="btn-font-dec" title="글자 크기 축소">A-</button>
+        <button class="btn-ctrl" id="btn-font-reset" title="글자 크기 초기화">기본</button>
+        <button class="btn-ctrl" id="btn-font-inc" title="글자 크기 확대">A+</button>
+        <button class="btn-ctrl" id="btn-theme-toggle" title="다크/라이트 테마 전환">
+          <span id="theme-icon">☀️</span> 테마 전환
+        </button>
+        <button class="btn-ctrl btn-tour" id="btn-copy-json" title="데모용 주요 필드 JSON 복사 (축약 객체)">
+          📋 데모용 주요 필드 JSON 복사
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Disclaimer Banner (Mandatory Notice) -->
+  <div class="disclaimer-banner">
+    <span class="disclaimer-tag">NOTICE</span>
+    <span>저장된 <strong>T01 실제 검증 결과</strong>를 재생한 발표용 정적 데모입니다. <strong>현재 Gemini API를 호출하지 않습니다.</strong></span>
+  </div>
+
+  <!-- Tour Navigation Bar for Presenter -->
+  <div class="tour-bar">
+    <span class="tour-label">발표 시연 흐름:</span>
+    <button class="tour-chip active" data-step="all">전체 개요</button>
+    <button class="tour-chip" data-step="step1">1. PatchCore 검사</button>
+    <button class="tour-chip" data-step="step2">2. 판정 규칙 (Rule 5)</button>
+    <button class="tour-chip" data-step="step3">3. Gemini 진단 요약</button>
+    <button class="tour-chip" data-step="step4">4. Evidence 검증 (F0001~F0006)</button>
+    <button class="tour-chip" data-step="step5">5. 권장 조치 및 한계</button>
+  </div>
+
+  <!-- ==========================================================================
+       Main Workspace
+       ========================================================================== -->
+  <main>
+    <div class="workspace-grid">
+
+      <!-- ======================================================================
+           LEFT COLUMN: Vision Inspection & Decision Layer (서버 확정 데이터)
+           ====================================================================== -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+
+        <!-- Card 1: 검사 개요 및 이미지 메타데이터 -->
+        <section class="card" id="card-meta">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">검사 메타데이터 및 이미지 품질</h2>
+                <p class="card-subtitle">서버 저장소(JsonlInspectionStorage) 확정 레코드</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-vision">Layer 1: Vision Data</span>
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">검사 식별자 (Inspection ID)</div>
+              <div class="kv-value highlight-cyan">INSP-001396</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">제품 ID (Product ID)</div>
+              <div class="kv-value">PROD-BOTTLE-T01</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">이미지 ID (Server Sanitized)</div>
+              <div class="kv-value">IMG-BOTTLE-0084</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">검사 상태 (Status)</div>
+              <div class="kv-value highlight-ok">COMPLETED</div>
+            </div>
+          </div>
+
+          <!-- Schematic Vector Visual -->
+          <div class="schematic-box">
+            <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 0.7rem; font-weight: 700; color: var(--warning); background: rgba(251, 191, 36, 0.12); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--warning-border);">
+                ※ 개념도 — 실제 검사 이미지 아님 (규격·조도 통계 참고용)
+              </span>
+              <span style="font-size: 0.68rem; font-family: var(--font-mono); color: var(--text-dim);">900 × 900 Canvas</span>
+            </div>
+            <svg width="100%" height="150" viewBox="0 0 400 150" style="max-width: 400px;">
+              <!-- Background grid -->
+              <defs>
+                <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#grid)" rx="8" />
+
+              <!-- Bottle Silhouette Concept Wireframe -->
+              <path d="M 175 25 L 225 25 L 225 45 L 245 70 L 245 130 L 155 130 L 155 70 L 175 45 Z" 
+                    fill="rgba(56, 189, 248, 0.05)" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4,2"/>
+              
+              <!-- Abstract Geometry Mark (Concept Only) -->
+              <rect x="175" y="25" width="50" height="20" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="2,2" rx="2"/>
+              <text x="232" y="38" fill="#94a3b8" font-size="10" font-family="monospace">개념 외곽선</text>
+
+              <!-- Inspection Boundary Marks -->
+              <circle cx="155" cy="70" r="3" fill="#38bdf8"/>
+              <circle cx="245" cy="70" r="3" fill="#38bdf8"/>
+              <circle cx="155" cy="130" r="3" fill="#38bdf8"/>
+              <circle cx="245" cy="130" r="3" fill="#38bdf8"/>
+
+              <!-- Metrics Text -->
+              <text x="20" y="35" fill="#94a3b8" font-size="10" font-family="monospace">해상도: 900 × 900 px</text>
+              <text x="20" y="55" fill="#94a3b8" font-size="10" font-family="monospace">채널: 3 (RGB)</text>
+              <text x="20" y="75" fill="#34d399" font-size="10" font-family="monospace">평균 밝기: 135.86 (NORMAL)</text>
+              <text x="20" y="95" fill="#94a3b8" font-size="10" font-family="monospace">표준편차: 92.66</text>
+              <text x="20" y="115" fill="#94a3b8" font-size="10" font-family="monospace">동적범위: 31.0 ~ 255.0</text>
+            </svg>
+            <div class="schematic-caption">
+              <span>● 이미지 품질: <strong>NORMAL</strong> (조도 이상 없음)</span>
+              <span>● 결함 탐지: <strong>COMPLETED</strong> (모델 Heatmap 아님)</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Card 2: PatchCore 모델 이상치 탐지 결과 -->
+        <section class="card" id="card-patchcore">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">PatchCore 이상치 탐지 결과</h2>
+                <p class="card-subtitle">메모리 뱅크 최근접 이웃 거리 기반 비지도 이상 탐지</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-vision">Layer 1: Vision Inference</span>
+          </div>
+
+          <!-- Anomaly Gauge -->
+          <div class="gauge-container">
+            <div class="gauge-header">
+              <span class="gauge-title">PatchCore 이상 점수 (Anomaly Score)</span>
+              <span class="gauge-score">31.3346</span>
+            </div>
+
+            <!-- Visual Bar -->
+            <div class="gauge-bar-track">
+              <!-- Score Fill (31.3346 / 50.00 = 62.67%) -->
+              <div class="gauge-bar-fill" style="width: 62.67%;"></div>
+              <!-- Fixed Threshold Pin (34.1442 / 50.00 = 68.29%) -->
+              <div class="gauge-threshold-pin" style="left: 68.29%;">
+                <span class="gauge-threshold-label">임계값 34.1442</span>
+              </div>
+            </div>
+
+            <div class="gauge-scale">
+              <span>0.00 (표시 눈금)</span>
+              <span style="color: var(--success); font-weight: 700;">▲ 31.3346 (이상 점수 실측치)</span>
+              <span>50.00 (표시 눈금)</span>
+            </div>
+
+            <div class="gauge-meta-row">
+              <span>임계값 대비 마진: <strong style="color: var(--success);">-2.8096</strong> (임계값 미만 / 모델 OK 판정)</span>
+              <span>CPU 단일 추론 시간: <strong>41.34 ms</strong></span>
+            </div>
+          </div>
+
+          <div style="font-size: 0.71rem; color: var(--text-dim); margin-top: 6px; padding: 0 4px;">
+            ※ 0~50은 시각화를 위한 표시 눈금이며 PatchCore 이상 점수의 전체 범위나 결함 확률을 의미하지 않습니다.
+          </div>
+
+          <div style="font-size: 0.74rem; color: var(--text-muted); background: rgba(56, 189, 248, 0.05); padding: 8px 12px; border-radius: var(--radius-sm); border-left: 3px solid var(--primary); line-height: 1.45; margin-top: 8px;">
+            ※ 이상 점수 31.3346이 고정 임계값 34.1442보다 낮아 PatchCore 모델은 OK로 판정했습니다. 다만 이 판정이 실제 결함이 없음을 보증하지는 않습니다. (테스트셋 기준 재현율 약 50.79%로 미탐 한계 존재)
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">모델 판정 (result)</div>
+              <div class="kv-value highlight-ok">OK (양품 판정)</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">규칙 기반 판정 신뢰도 (decision_confidence)</div>
+              <div class="kv-value">HIGH (규칙 조건 충족 / 비보정)</div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.70rem; color: var(--text-dim); padding: 0 4px; margin-top: 4px;">
+            ※ decision_confidence는 영상 품질 정상 및 검사 완료 시 서버 규칙이 부여하는 상태값(HIGH)이며, 통계적으로 보정된 결함 확률이나 AI 추정치가 아닙니다.
+          </div>
+        </section>
+
+        <!-- Card 3: 서버 규칙 기반 최종 검사 판정 -->
+        <section class="card" id="card-decision">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <polyline points="9 12 11 14 15 10"></polyline>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">서버 규칙 기반 최종 검사 판정</h2>
+                <p class="card-subtitle">FastAPI Decision 계층의 6대 우선순위 규칙 집계</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-decision">Layer 2: Server Decision</span>
+          </div>
+
+          <!-- Final Verdict Banner -->
+          <div class="verdict-banner">
+            <div class="verdict-left">
+              <div class="verdict-badge">OK</div>
+              <div class="verdict-text">
+                <h3>최종 합격 (ALL_CHECKS_PASSED)</h3>
+                <p>정상 품질 영상 및 이상 점수 임계값 미만 확인</p>
+              </div>
+            </div>
+            <div class="verdict-rule-tag">Rule 5 적용</div>
+          </div>
+
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">최종 판정 (final_result)</div>
+              <div class="kv-value highlight-ok">OK</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">최종 사유 코드 (final_reason_code)</div>
+              <div class="kv-value">ALL_CHECKS_PASSED</div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.76rem; color: var(--text-muted); background: var(--bg-surface-sunken); padding: 10px 14px; border-radius: var(--radius-sm); border-left: 3px solid var(--border-focus);">
+            💡 <strong>판정 보호 원칙:</strong> FastAPI 서버가 확정한 이 검사 판정은 추후 Gemini AI Agent 분석에 의해 <strong>절대 변경되거나 덮어써지지 않습니다.</strong>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ======================================================================
+           RIGHT COLUMN: Gemini Agent & Evidence Verification (AI 진단 계층)
+           ====================================================================== -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+
+        <!-- Card 4: Gemini AI 진단 요약 -->
+        <section class="card" id="card-gemini">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: #38bdf8;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">Gemini AI 근거 기반 진단 (T01 실서버 응답)</h2>
+                <p class="card-subtitle">gemini-3.8-flash (SDK 2.31.0) E2E 검증 통과</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-agent">Layer 3: AI Diagnosis</span>
+          </div>
+
+          <!-- Overall Summary Quote -->
+          <div class="gemini-summary-box">
+            <div class="gemini-summary-header">
+              <span class="gemini-tag">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+                AI 진단 종합 요약 (overall_summary)
+              </span>
+              <span style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--success); font-weight: 700;">analysis_status: COMPLETED</span>
+            </div>
+            <div class="gemini-summary-quote">
+              "기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지 않습니다."
+            </div>
+          </div>
+
+          <!-- Recommended Checks -->
+          <div class="checks-box">
+            <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+              권장 조치 (recommended_checks: 1건)
+            </div>
+            <div class="check-item">
+              <div class="check-icon">✓</div>
+              <div class="check-content">
+                <h4>check_code: CONTINUE_MONITORING</h4>
+                <p>현재 기록된 판정을 유지하면서 후속 검사와 현장 상태를 관찰하세요.</p>
+                <button class="evidence-ref-pill" id="btn-highlight-f0003" title="클릭 시 F0003 관측 사실 하이라이트">
+                  <span>근거 참조 (evidence_refs):</span>
+                  <strong>["F0003"]</strong> ➔
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Possible Causes (Explicitly 0) -->
+          <div class="kv-item" style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <div class="kv-label">가능한 원인 가설 (possible_causes)</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">
+                빈 배열 [ ] (정상 판정 검사로 추가적인 장애 원인 가설 없음)
+              </div>
+            </div>
+            <span style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--text-dim);">0건</span>
+          </div>
+        </section>
+
+        <!-- Card 5: Evidence 및 Fact 참조 관계 -->
+        <section class="card" id="card-evidence">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: #34d399;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">Evidence & Fact 결정적 검증 관계</h2>
+                <p class="card-subtitle">JSON Pointer 기반 도구 반환값과 모델 관측값의 1:1 결정적 검증</p>
+              </div>
+            </div>
+            <span class="layer-badge layer-agent">PASS: 6/6 Verified</span>
+          </div>
+
+          <!-- Facts Table -->
+          <div class="facts-table-container">
+            <table class="facts-table">
+              <thead>
+                <tr>
+                  <th>Fact ID</th>
+                  <th>Source Field (JSON Pointer)</th>
+                  <th>Observed Value</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="fact-row-f0001">
+                  <td style="color: var(--primary); font-weight: bold;">F0001</td>
+                  <td>/data/defect_detection_status</td>
+                  <td>"COMPLETED"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-f0002">
+                  <td style="color: var(--primary); font-weight: bold;">F0002</td>
+                  <td>/data/final_reason_code</td>
+                  <td>"ALL_CHECKS_PASSED"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-f0003" style="border-left: 3px solid var(--success);">
+                  <td style="color: var(--success); font-weight: bold;">F0003 ⭐</td>
+                  <td style="color: var(--success);">/data/final_result</td>
+                  <td style="color: var(--success); font-weight: bold;">"OK"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-f0004">
+                  <td style="color: var(--primary); font-weight: bold;">F0004</td>
+                  <td>/data/image_quality_status</td>
+                  <td>"NORMAL"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-f0005">
+                  <td style="color: var(--primary); font-weight: bold;">F0005</td>
+                  <td>/data/result</td>
+                  <td>"OK"</td>
+                  <td>E0001</td>
+                </tr>
+                <tr id="fact-row-f0006">
+                  <td style="color: var(--primary); font-weight: bold;">F0006</td>
+                  <td>/data/status</td>
+                  <td>"COMPLETED"</td>
+                  <td>E0001</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tool Execution Receipt -->
+          <div class="receipt-box">
+            <div>
+              <strong style="color: var(--primary);">Evidence ID: E0001</strong> (서버가 발급한 도구 실행 영수증)
+              <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 2px;">
+                도구: <code>get_inspection_result(inspection_id="INSP-001396")</code>
+              </div>
+              <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 3px;">
+                ※ Gemini의 도구 요청 시 Python 서버가 실행 후 E0001을 부여하며, 관측 사실의 진위는 서버가 검증합니다.
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <span style="color: var(--success); font-weight: 700;">실행 성공 (2.229ms)</span>
+              <div style="font-size: 0.7rem; color: var(--text-muted);">Jsonl 저장소 읽기: 2회</div>
+              <div style="font-size: 0.68rem; color: var(--success); margin-top: 2px;">서버 결정적 검증: PASS</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Card 6: 진단 한계 고지 -->
+        <section class="card" id="card-limitations">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="card-icon" style="color: var(--warning);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="card-title">진단 한계 및 안전 고지 (limitations: 4건)</h2>
+                <p class="card-subtitle">서버 안전 정책에 따라 필수 포함된 한계 항목</p>
+              </div>
+            </div>
+            <span class="layer-badge" style="background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border);">안전 가드</span>
+          </div>
+
+          <div class="limitations-list">
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>MODEL_NOT_GUARANTEE:</strong> 모델의 OK 판정은 실제 무결점 제품을 보증하지 않습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>UNKNOWN_PHYSICAL_CAUSE:</strong> 검사 기록만으로 물리적 장애 원인을 확정할 수 없습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>MISSING_BRIGHTNESS_THRESHOLDS:</strong> 검사 당시 밝기 기준치가 확인되지 않아 현재 설정으로 대체하지 않았습니다.
+              </div>
+            </div>
+            <div class="limitation-item">
+              <span class="warn-icon">⚠</span>
+              <div>
+                <strong>NO_PROBABILITY_CALIBRATION:</strong> 규칙 기반 HIGH 신뢰도는 보정된 확률이나 100% 신뢰도를 뜻하지 않습니다.
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- ======================================================================
+         BOTTOM FULL WIDTH: Execution Trace & Reliability Verification
+         ====================================================================== -->
+    <section class="trace-section" id="card-trace">
+      <div class="card-header">
+        <div class="card-title-group">
+          <div class="card-icon" style="color: var(--primary);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+          </div>
+          <div>
+            <h2 class="card-title">실제 E2E 검증 Trace 및 계측 지표</h2>
+            <p class="card-subtitle">FastAPI ASGI In-Process 라우트 호출 실측치 (2026-10-16T00:35:24 UTC)</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <span class="layer-badge" style="background: rgba(56, 189, 248, 0.15); color: var(--primary);">전체 소요: 13,577.58 ms (~13.58초)</span>
+          <span class="layer-badge" style="background: rgba(52, 211, 153, 0.15); color: var(--success);">총 토큰: 4,706 tokens</span>
+        </div>
+      </div>
+
+      <div class="pipeline-steps">
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 1 (2,878ms)</div>
+          <div class="step-title">Function Calling</div>
+          <span class="step-badge">HTTP 200</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">get_inspection_result 선택</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 2 (2.23ms)</div>
+          <div class="step-title">Python 도구 실행</div>
+          <span class="step-badge">서버 E0001 부여</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">서버 도구 실행 및 조기 종료</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 3 (10,528ms)</div>
+          <div class="step-title">단순화된 JSON 생성</div>
+          <span class="step-badge">HTTP 200</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">단순화된 JSON 스키마 기반 보고서 생성</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 4 (0.45ms)</div>
+          <div class="step-title">Pydantic 검증</div>
+          <span class="step-badge">PASS</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">SimpleReport ➔ Draft</div>
+        </div>
+
+        <div class="pipeline-step step-pass">
+          <div class="step-number">Step 5 (1.12ms)</div>
+          <div class="step-title">Evidence 결정적 검증</div>
+          <span class="step-badge">100% 일치</span>
+          <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">판정 불변 보존 (OK/OK)</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==========================================================================
+       Footer
+       ========================================================================== -->
+  <footer>
+    <div>
+      <strong>VisionInsight Project</strong> — 2026.10.20 기술 발표 데모 패키지
+    </div>
+    <div class="footer-links">
+      <span>검증 환경: Python 3.11 / FastAPI / PatchCore / Gemini 3.8 Flash</span>
+      <span>•</span>
+      <span>외부 API 호출: <strong>0회</strong> (정적 데이터 재생)</span>
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div class="toast-msg" id="toast">알림 메시지</div>
+
+  <!-- ==========================================================================
+       Embedded JavaScript (Zero External Dependencies)
+       ========================================================================== -->
+  <script>
+    (function() {
+      // 1. Theme Toggle
+      const themeToggleBtn = document.getElementById('btn-theme-toggle');
+      const themeIcon = document.getElementById('theme-icon');
+      const htmlEl = document.documentElement;
+
+      themeToggleBtn.addEventListener('click', function() {
+        const currentTheme = htmlEl.getAttribute('data-theme');
+        const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        htmlEl.setAttribute('data-theme', nextTheme);
+        themeIcon.textContent = nextTheme === 'dark' ? '☀️' : '🌙';
+        showToast(nextTheme === 'dark' ? '다크 모드로 전환되었습니다.' : '라이트 모드로 전환되었습니다.');
+      });
+
+      // 2. Font Zoom Controls
+      let currentZoom = 14;
+      const fontIncBtn = document.getElementById('btn-font-inc');
+      const fontDecBtn = document.getElementById('btn-font-dec');
+      const fontResetBtn = document.getElementById('btn-font-reset');
+
+      fontIncBtn.addEventListener('click', function() {
+        if (currentZoom < 18) {
+          currentZoom += 1;
+          document.body.style.setProperty('--base-font-size', currentZoom + 'px');
+          showToast(`글자 크기: ${currentZoom}px`);
+        }
+      });
+
+      fontDecBtn.addEventListener('click', function() {
+        if (currentZoom > 12) {
+          currentZoom -= 1;
+          document.body.style.setProperty('--base-font-size', currentZoom + 'px');
+          showToast(`글자 크기: ${currentZoom}px`);
+        }
+      });
+
+      fontResetBtn.addEventListener('click', function() {
+        currentZoom = 14;
+        document.body.style.setProperty('--base-font-size', '14px');
+        showToast('글자 크기가 기본값(14px)으로 복원되었습니다.');
+      });
+
+      // 3. Highlight Fact Row from Recommended Check button
+      const highlightBtn = document.getElementById('btn-highlight-f0003');
+      const factRowF0003 = document.getElementById('fact-row-f0003');
+
+      highlightBtn.addEventListener('click', function() {
+        // Remove previous targets
+        document.querySelectorAll('.facts-table tr').forEach(r => r.classList.remove('fact-target'));
+        factRowF0003.classList.add('fact-target');
+        factRowF0003.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        showToast('관측 사실 F0003 (/data/final_result = "OK")이 하이라이트되었습니다.');
+      });
+
+      // Click on table row directly
+      document.querySelectorAll('.facts-table tbody tr').forEach(row => {
+        row.addEventListener('click', function() {
+          document.querySelectorAll('.facts-table tr').forEach(r => r.classList.remove('fact-target'));
+          this.classList.add('fact-target');
+          const factId = this.querySelector('td').textContent.trim();
+          showToast(`Fact [${factId}] 선택: Evidence E0001과 100% 결정적 검증 완료.`);
+        });
+      });
+
+      // 4. Tour Navigation / Step Highlighter
+      const tourChips = document.querySelectorAll('.tour-chip');
+      const allCards = document.querySelectorAll('.card, .trace-section');
+
+      tourChips.forEach(chip => {
+        chip.addEventListener('click', function() {
+          tourChips.forEach(c => c.classList.remove('active'));
+          this.classList.add('active');
+
+          const step = this.getAttribute('data-step');
+          allCards.forEach(card => card.classList.remove('highlighted'));
+
+          if (step === 'all') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast('전체 검사 및 진단 아키텍처 개요');
+          } else if (step === 'step1') {
+            const el = document.getElementById('card-patchcore');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 1: 이상 점수 31.3346 (임계값 34.1442 미만 ➔ 모델 OK 판정, 무결점 보증 아님)');
+          } else if (step === 'step2') {
+            const el = document.getElementById('card-decision');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 2: 서버 규칙 5 적용 ➔ 최종 판정 OK (ALL_CHECKS_PASSED)');
+          } else if (step === 'step3') {
+            const el = document.getElementById('card-gemini');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 3: Gemini 3.8 Flash 근거 기반 진단 (종합 요약 및 권고)');
+          } else if (step === 'step4') {
+            const el = document.getElementById('card-evidence');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 4: 서버 발급 Evidence E0001 및 6개 Fact 1:1 결정적 검증');
+          } else if (step === 'step5') {
+            const el = document.getElementById('card-limitations');
+            el.classList.add('highlighted');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast('Step 5: 4대 진단 한계 및 CONTINUE_MONITORING 권장 조치');
+          }
+        });
+      });
+
+      // 5. Copy JSON (데모용 주요 필드 축약 객체)
+      const copyJsonBtn = document.getElementById('btn-copy-json');
+      const t01DemoJson = {
+        "analysis_id": "ANALYSIS-6cfd38c64c784999ab27d50a2bb8c092",
+        "inspection_id": "INSP-001396",
+        "analysis_status": "COMPLETED",
+        "error_code": null,
+        "inspection_result": "OK",
+        "final_result": "OK",
+        "final_reason_code": "ALL_CHECKS_PASSED",
+        "overall_summary": "기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지 않습니다.",
+        "observed_facts": [
+          {"fact_id": "F0001", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/defect_detection_status", "observed_value": "COMPLETED"},
+          {"fact_id": "F0002", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/final_reason_code", "observed_value": "ALL_CHECKS_PASSED"},
+          {"fact_id": "F0003", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/final_result", "observed_value": "OK"},
+          {"fact_id": "F0004", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/image_quality_status", "observed_value": "NORMAL"},
+          {"fact_id": "F0005", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/result", "observed_value": "OK"},
+          {"fact_id": "F0006", "evidence_id": "E0001", "source_tool": "get_inspection_result", "source_field": "/data/status", "observed_value": "COMPLETED"}
+        ],
+        "possible_causes": [],
+        "recommended_checks": [
+          {
+            "check_code": "CONTINUE_MONITORING",
+            "instruction": "현재 기록된 판정을 유지하면서 후속 검사와 현장 상태를 관찰하세요.",
+            "evidence_refs": ["F0003"]
+          }
+        ],
+        "limitations": [
+          "검사 당시 밝기 기준치가 확인되지 않아 현재 설정으로 대체하지 않았습니다.",
+          "모델의 OK 판정은 실제 무결점 제품을 보증하지 않습니다.",
+          "규칙 기반 HIGH 신뢰도는 보정된 확률이나 100% 신뢰도를 뜻하지 않습니다.",
+          "검사 기록만으로 물리적 장애 원인을 확정할 수 없습니다."
+        ],
+        "inspection_snapshot": {
+          "status": "COMPLETED",
+          "result": "OK",
+          "image_quality_status": "NORMAL",
+          "defect_detection_status": "COMPLETED",
+          "final_result": "OK",
+          "final_reason_code": "ALL_CHECKS_PASSED",
+          "anomaly_score": 31.334630966186523,
+          "decision_threshold": 34.1442
+        },
+        "tools_used": ["get_inspection_result"]
+      };
+      const t01RawJson = t01DemoJson;
+
+      copyJsonBtn.addEventListener('click', function() {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(JSON.stringify(t01DemoJson, null, 2)).then(() => {
+            showToast('데모용 주요 필드 JSON(축약 데이터)이 클립보드에 복사되었습니다.');
+          }).catch(() => {
+            fallbackCopy(JSON.stringify(t01DemoJson, null, 2));
+          });
+        } else {
+          fallbackCopy(JSON.stringify(t01DemoJson, null, 2));
+        }
+      });
+
+      function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('데모용 주요 필드 JSON(축약 데이터)이 클립보드에 복사되었습니다.');
+      }
+
+      // Toast helper
+      const toastEl = document.getElementById('toast');
+      let toastTimer = null;
+      function showToast(msg) {
+        if (toastTimer) clearTimeout(toastTimer);
+        toastEl.textContent = msg;
+        toastEl.style.display = 'block';
+        toastTimer = setTimeout(() => {
+          toastEl.style.display = 'none';
+        }, 2500);
+      }
+    })();
+  </script>
+</body>
+</html>

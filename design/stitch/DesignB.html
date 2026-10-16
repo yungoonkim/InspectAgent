@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+
+<html lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>VisionInsight AI Platform</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body { font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11'; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased flex flex-col justify-between selection:bg-blue-100 selection:text-blue-900">
+<!-- TOP HEADER -->
+<header class="bg-white/90 backdrop-blur-md border-b border-slate-200/70 sticky top-0 z-40">
+<div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+<!-- Left: Logo & Demo Pill -->
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-500/20">
+<span class="material-symbols-outlined text-xl">view_in_ar</span>
+</div>
+<span class="text-lg font-bold tracking-tight text-slate-900">VisionInsight</span>
+</div>
+<span class="text-xs bg-slate-100 text-slate-500 font-medium px-2.5 py-1 rounded-full border border-slate-200/60">Demo Mode</span>
+</div>
+<!-- Center: Clean Navigation Tabs -->
+<nav class="hidden md:flex items-center gap-1">
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-semibold bg-blue-50 text-blue-600 transition-colors" href="#">실시간 검사</a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors" href="#">검사 이력</a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors" href="#">AI 리포트</a>
+<a class="px-3.5 py-1.5 rounded-lg text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors" href="#">이벤트 로그</a>
+</nav>
+<!-- Right: System Status Only -->
+<div class="flex items-center gap-2 font-medium text-xs text-slate-600 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-full">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+</span>
+<span>시스템 정상 (Ready)</span>
+</div>
+</div>
+</header>
+<!-- MAIN WORKSPACE -->
+<main class="w-full flex-1 max-w-7xl mx-auto px-6 py-8">
+<!-- Title & Workflow Stepper Strip -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-7">
+<div>
+<h1 class="text-2xl font-bold tracking-tight text-slate-900">실시간 비전 품질 검사</h1>
+<p class="text-sm text-slate-500 mt-1">병 제품 외관 결함 검출 및 Gemini 멀티모달 원인 진단</p>
+</div>
+<!-- Lightweight Stepper Indicator -->
+<div class="flex items-center gap-2 text-xs font-medium text-slate-500 bg-white border border-slate-200/80 rounded-xl px-3.5 py-2 shadow-sm self-start md:self-auto">
+<span class="text-slate-400">1. 라이브 스트림</span>
+<span class="text-slate-300">→</span>
+<span class="text-slate-400">2. 프레임 캡처</span>
+<span class="text-slate-300">→</span>
+<span class="text-blue-600 font-semibold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>3. ROI 영역
+        </span>
+<span class="text-slate-300">→</span>
+<span class="text-slate-600">4. PatchCore 검사</span>
+<span class="text-slate-300">→</span>
+<span class="text-indigo-600 font-semibold">5. Gemini 진단</span>
+</div>
+</div>
+<!-- TWO-COLUMN INSPECTION WORKSPACE -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-7">
+<!-- LEFT COLUMN: Live View -->
+<div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm flex flex-col justify-between">
+<!-- Card Header -->
+<div class="flex items-center justify-between pb-4">
+<div class="flex items-center gap-2.5">
+<span class="relative flex h-2.5 w-2.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+</span>
+<h2 class="text-sm font-semibold text-slate-800 tracking-tight">시뮬레이션 라이브 스트림 (SIMULATED LIVE)</h2>
+</div>
+<span class="text-xs font-mono text-slate-400">Line A-02 · Top Camera</span>
+</div>
+<!-- Clean Realistic Video Preview -->
+<div class="relative w-full aspect-[16/9] rounded-xl overflow-hidden bg-slate-900 shadow-inner">
+<img alt="Automated bottling factory conveyor belt inspection" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA152D6jeQzLaMmd0S_DngaIJ5TMhkWRuaFJ3Fqox4FUFQfsjaeeW4OLEAFnTUJSfEPkHeL6k-vl8iUT3WMKz_YbLJT-patKk_JvBs7ZHp0R-85iTzbHCO65KNOiC9EH3frGIrx0iHBuxdqQaKOdDto0uXs73SJZxIiY2EvW7OjGacDwFortfizqUoXLTOt1Sq6SDVqvEy1YoafK1aQP6Ga-RGVO-CeFsLmOuLxuxG6vbUJDmLrs0wO"/>
+<div class="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-md text-[11px] font-mono text-slate-200">
+            1080p 60fps
+          </div>
+</div>
+<!-- Controls Bar -->
+<div class="pt-4 flex items-center justify-between">
+<button class="w-10 h-10 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors" title="재생/일시정지" type="button">
+<span class="material-symbols-outlined text-xl">pause</span>
+</button>
+<button class="bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-medium px-5 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 text-sm" id="grabFrameBtn" type="button">
+<span class="material-symbols-outlined text-lg">photo_camera</span>
+<span>📸 프레임 캡처 (Grab Frame)</span>
+</button>
+</div>
+</div>
+<!-- RIGHT COLUMN: Grab Image & ROI -->
+<div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm flex flex-col justify-between">
+<!-- Card Header -->
+<div class="flex items-center justify-between pb-4">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-blue-600"></span>
+<h2 class="text-sm font-semibold text-slate-800 tracking-tight">캡처 프레임 &amp; 검사 영역 (ROI)</h2>
+</div>
+<button class="text-xs text-slate-500 hover:text-blue-600 transition-colors font-medium" type="button">
+            영역 초기화 (Reset ROI)
+          </button>
+</div>
+<!-- Image Preview with Clean ROI Selection -->
+<div class="relative w-full aspect-[16/9] rounded-xl overflow-hidden bg-slate-100 flex items-center justify-center">
+<img alt="Captured bottle neck inspection frame" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCUG4DLi5dxq8PlLwyzOlPCxzrXSwe3Gw8bTtxiG-EAOGtdH95rhclzZXZdGJ4_XLOYOvLWKpQx5GplEKjUwEUNENNCwCVwiEs9KrtSfvxh6aD1NKXxZWs-YWNjKj9ld3Im9fNafiFnCbNCiRovIwTyW_MPBBXV5Tj1Evb8FRVNUkjJC55Yo3LFdzUbKZZPRUnJROj6AuAoacQHFuKjGqMs5wr9kudNPHH40c0XyeSLb5wdNhJ6HPps"/>
+<!-- Clean Bounding Box (No chaotic glow) -->
+<div class="absolute inset-[16%] border-2 border-blue-600 rounded-sm bg-blue-500/5 shadow-[0_0_0_9999px_rgba(15,23,42,0.35)] pointer-events-none">
+<!-- Compact Coordinate Tag -->
+<div class="absolute -top-6 left-0 bg-blue-600 text-white font-mono text-[10px] font-medium px-2 py-0.5 rounded shadow-sm">
+              ROI-1 [312, 184, 420×420]
+            </div>
+<!-- Neat Corner Handles -->
+<div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-sm"></div>
+<div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-sm"></div>
+<div class="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-sm"></div>
+<div class="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-blue-600 rounded-sm"></div>
+</div>
+</div>
+<!-- Primary Inspection Action -->
+<div class="pt-4">
+<button class="bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-semibold py-2.5 px-6 rounded-xl flex items-center justify-center gap-2 w-full text-base shadow-sm transition" type="button">
+<span class="material-symbols-outlined text-xl">play_circle</span>
+<span>Run Inspection (검사 실행)</span>
+</button>
+</div>
+</div>
+</div>
+<!-- COMPACT RESULT & GEMINI AI DIAGNOSIS ROW -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- Column 1: 검사 판정 결과 (Inspection Outcome) -->
+<div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm flex flex-col justify-between">
+<div>
+<!-- Header & Outcome Badge -->
+<div class="flex items-center justify-between pb-4 border-b border-slate-100">
+<span class="text-xs font-semibold text-slate-500 tracking-wider uppercase">검사 판정 결과</span>
+<span class="bg-rose-50 text-rose-700 border border-rose-200 font-bold px-3.5 py-1.5 rounded-xl text-sm inline-flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-rose-600"></span>
+              NG (불량 검출)
+            </span>
+</div>
+<!-- PatchCore Anomaly Score Section -->
+<div class="pt-5">
+<span class="text-xs font-medium text-slate-500">PatchCore 이상치 스코어</span>
+<div class="flex items-baseline justify-between mt-1">
+<span class="text-3xl font-bold font-mono tracking-tight text-rose-600">48.7210</span>
+<span class="text-xs font-medium text-slate-500">
+                품질 기준 임계치 <span class="font-mono font-semibold text-slate-700">34.1442</span>
+</span>
+</div>
+<!-- Elegant Gauge Line -->
+<div class="relative w-full pt-4 pb-2">
+<div class="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex">
+<div class="h-full bg-slate-300" style="width: 55%;"></div>
+<div class="h-full bg-rose-500" style="width: 45%;"></div>
+</div>
+<!-- Pin for Threshold -->
+<div class="absolute top-2.5 flex flex-col items-center" style="left: 55%; transform: translateX(-50%);">
+<div class="w-0.5 h-5 bg-slate-700"></div>
+</div>
+<div class="flex justify-between items-center text-[11px] font-mono text-slate-500 mt-2">
+<span>기준점 34.14</span>
+<span class="text-rose-600 font-semibold">+14.58 pts 초과</span>
+</div>
+</div>
+</div>
+</div>
+<p class="text-xs text-slate-400 pt-3 border-t border-slate-100">
+          ※ PatchCore 비지도 학습 기반 이상치 탐지 결과 (기준 초과 시 NG 판정)
+        </p>
+</div>
+<!-- Column 2: Gemini AI 진단 리포트 (Gemini AI Diagnosis) -->
+<div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm flex flex-col justify-between">
+<div>
+<!-- Header with Subtle Gemini Pill -->
+<div class="flex items-center justify-between pb-4 border-b border-slate-100">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-indigo-600 text-lg">auto_awesome</span>
+<h3 class="text-sm font-semibold text-slate-900 tracking-tight">Gemini AI 진단 리포트</h3>
+</div>
+<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 font-medium px-2.5 py-1 rounded-full text-xs">
+              Gemini 3.8 Flash 진단
+            </span>
+</div>
+<!-- Structured Diagnosis Findings -->
+<div class="pt-4 space-y-3.5">
+<!-- 1. 핵심 요약 -->
+<div>
+<span class="text-xs font-semibold text-slate-700 block mb-1">1. 핵심 요약 (Summary)</span>
+<p class="text-sm font-medium text-slate-800 bg-slate-50 border border-slate-100 rounded-xl p-3">
+                병목 상단 나사산 부위 2.3mm 미세 크랙(Micro-crack) 및 림 결손 감지.
+              </p>
+</div>
+<!-- 2. 권장 점검 조치 -->
+<div>
+<span class="text-xs font-semibold text-slate-700 block mb-1">2. 권장 점검 조치 (Recommended Checks)</span>
+<ul class="text-xs text-slate-600 space-y-1.5 pl-1">
+<li class="flex items-start gap-1.5">
+<span class="text-blue-600 font-bold">•</span>
+<span>캐퍼(Capper) 몰드 정렬 및 토크 압력 센서 점검 권고</span>
+</li>
+<li class="flex items-start gap-1.5">
+<span class="text-blue-600 font-bold">•</span>
+<span>성형 냉각 구간 급랭에 의한 열응력 균열 여부 확인</span>
+</li>
+</ul>
+</div>
+<!-- 3. Expandable / Auxiliary Detail -->
+<div class="text-xs text-slate-500 bg-slate-50/70 rounded-lg p-2.5 border border-slate-100">
+<span class="font-medium text-slate-700">관찰 사실:</span> 나사산 부위 이상치 밀도 집중 및 광학 굴절 불균일
+            </div>
+</div>
+</div>
+<p class="text-[11px] text-slate-400 pt-3 border-t border-slate-100 mt-2">
+          ※ Gemini 3.8 Flash는 진단 설명 및 공정 조치 권고를 제공하며, 최종 품질 판정 결과는 PatchCore 모델의 이상치 기준에 따릅니다.
+        </p>
+</div>
+</div>
+</main>
+<!-- MINIMAL CLEAN FOOTER -->
+<footer class="border-t border-slate-200/60 bg-white py-4 mt-8">
+<div class="max-w-7xl mx-auto px-6 flex items-center justify-between text-xs text-slate-400">
+<div>© 2025 VisionInsight AI Platform. All rights reserved.</div>
+<div class="flex items-center gap-4">
+<span>Model: PatchCore ResNet-50</span>
+<span>AI: Gemini 3.8 Flash</span>
+</div>
+</div>
+</footer>
+<script>
+    const grabBtn = document.getElementById('grabFrameBtn');
+    if (grabBtn) {
+      grabBtn.addEventListener('click', () => {
+        const prevHtml = grabBtn.innerHTML;
+        grabBtn.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">refresh</span><span>프레임 캡처 중...</span>';
+        setTimeout(() => {
+          grabBtn.innerHTML = prevHtml;
+        }, 500);
+      });
+    }
+  </script>
+</body></html>

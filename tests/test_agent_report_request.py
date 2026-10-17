@@ -113,7 +113,7 @@ def test_report_uses_actual_server_evidence_and_safe_provenance_not_generated_te
                 observed = observed[int(component)] if isinstance(observed, list) else observed[component]
             assert observed == entry["observed_value"]
     assert all(not entry["source_field"].endswith("/product_id") for entry in envelope["catalog"])
-    expected_keys = {"sequence", "tool_name", "executed", "success", "error_code", "evidence_id"}
+    expected_keys = {"sequence", "tool_name", "executed", "success", "error_code", "evidence_id", "origin", "comparison_inspection_id"}
     for entry, trace in zip(envelope["tool_execution_trace"], result.tool_execution_trace):
         assert set(entry) == expected_keys
         assert entry == {name: getattr(trace, name) for name in expected_keys}

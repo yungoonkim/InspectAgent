@@ -111,8 +111,12 @@ def test_warning_quality_and_failure_log_investigations_remain_available(storage
     service, generator = service_for(storage, responses)
     result = asyncio.run(service.analyze("INSP-000001"))
     assert result.analysis_status == "COMPLETED"
-    assert result.tools_used == ["get_inspection_result", additional_tool]
-    assert [entry.round_number for entry in result.tool_execution_trace] == [1, 2]
+    assert result.tools_used == ["get_inspection_result", additional_tool, *(["get_inspection_history"] if scenario == "warning" else [])]
+    assert [entry.round_number for entry in result.tool_execution_trace] == ([1, 2, 2] if scenario == "warning" else [1, 2])
+    if scenario == "warning":
+        history = result.tool_execution_trace[-1]
+        assert history.origin == "BACKEND_POLICY" and history.executed and history.success
+        assert history.evidence_id == "E0003"
     assert generator.await_count == 3
     assert result.observed_facts[-1].evidence_id == "E0002"
 

@@ -1,5 +1,16 @@
 # Vision 검사 데이터 스키마 및 식별자 명세 (`docs/inspection-data-schema.md`)
 
+> Day5 Step3 B-1-DB: ROI preset/version/명시 승인/활성 binding은 PostgreSQL에서 관리합니다.
+> [ROI 관리 API 계약](roi-postgresql-api.md)을 참조하세요. 캡처 세션과 관리 Bearer는 별개이며,
+> Draft 저장은 AUTO 승인·활성화가 아닙니다. 기존 검사/Agent JSONL 스키마는 변경하지 않았습니다.
+> ROI→PatchCore 연결은 미구현이고 중복 정규화 문제는 미해결입니다.
+
+> Day5 Step 2 Phase B: 영상/캡처는 기존 검사와 별도 식별자를 사용합니다.
+> `video_id + source_revision + frame_index`로 PNG를 획득하고 서버 발급 `capture_id`로 조회합니다.
+> Grab은 `image_id`나 `inspection_id`를 발급하지 않으며 검사 JSONL을 기록하지 않습니다.
+> 요청·응답·세션·TTL·오류 및 AUTO/MANUAL 인수 계약은
+> [영상·Grab 구현 문서](day5-step2-phaseb-video-grab-implementation.md)를 참조하세요.
+
 > Day 4 Step 3 추가 API: `POST /analyze/{inspection_id}`. AnalysisResponse는 DiagnosisResult를
 > 재사용하고 analysis_id, inspection_result, final_result, final_reason_code, UTC timestamp를 추가합니다.
 > 판정 필드는 저장 기록에서 가져오며 구형 기록의 누락 필드는 null입니다.

@@ -211,8 +211,20 @@ async def analyze_inspection(
         analysis_error("EVIDENCE_MISMATCH")
     response_data = result.model_dump()
     response_data["inspection_snapshot"] = {name: context.record.get(name) for name in snapshot_fields}
-    return AnalysisResponse(
+    analysis_resp = AnalysisResponse(
         **response_data, analysis_id=f"ANALYSIS-{uuid4().hex}",
         inspection_result=context.record["result"], final_result=context.record["final_result"],
         final_reason_code=context.record["final_reason_code"], timestamp=datetime.now(timezone.utc).isoformat(),
     )
+    try:
+        from pathlib import Path
+        import json
+        report_dir = Path("data/outputs/agent_reports")
+        report_dir.mkdir(parents=True, exist_ok=True)
+        dumped = analysis_resp.model_dump()
+        dumped["provenance"] = "LIVE_AGENT_ANALYSIS"
+        with open(report_dir / f"{context.inspection_id}.json", "w", encoding="utf-8") as f:
+            json.dump(dumped, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+    return analysis_resp

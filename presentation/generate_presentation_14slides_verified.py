@@ -1,29 +1,23 @@
 """VisionInsight 기술 발표 자료 14장 최종 검증본 생성 스크립트
-(14-Slide Verified Final Presentation with pytest 984 PASS & Slide 5 Overlap Fix)
+(14-Slide Verified Final Presentation with Day4 Completion & pytest 1089 PASS)
 
 주요 작업:
-1. 최신 Codex 검증 결과 반영:
-   - 전체 pytest 984 PASS / 경고 3건 (886, 928, 972 모두 제거)
-   - T01 실제 Gemini E2E PASS (13.578초, 6개 근거 통과)
-   - T03 실제 Gemini E2E PASS (24.600초, 12개 근거 통과)
-   - T05 상태 정정: 기존 실서버 1회 FAIL (후속 조사 HTTP 504) -> 조기 종료 개선 후 오프라인 PASS, 실서버 재검증 대기
-   - T06 실제 Gemini E2E: NOT TESTED (미탐 사례 보존)
-2. Slide 5 (Decision 규칙) 하단 텍스트 겹침 완벽 수정:
-   - Rule 1, 2, 4, 5 카드 높이 0.95인치, 간격 1.05인치로 정밀 조정 (Y: 1.35~5.45)
-   - Rule 3(DEFECT_DETECTION_UNAVAILABLE), Rule 6(UNKNOWN_STATE_COMBINATION)을 하단 별도 박스(Y: 5.60~7.05)로 배치하여 겹침 0% 해소
-   - 슬라이드 경계(7.50) 바깥 넘침 없음, 폰트 과도한 축소 없음 (10~13pt)
-3. Slide 7 (Evidence 검증):
-   - 오타 잔존 확인 및 '관측 사실' 명문화 (T01 6개, T03 12개 검증)
-4. Slide 9 (핵심 기술 난제):
-   - 3열 카드 유지, T05 카드에 기존 1회 FAIL 및 조기 종료 개선 후 오프라인 PASS / 실서버 재검증 대기 반영
-   - 전체 pytest 984 PASS 반영, HTTP 504 원인 UNKNOWN 유지
-5. Slide 12 (구현 현황):
-   - 1단: 실제 Gemini E2E PASS (T01, T03)
-   - 2단: 구현 및 오프라인 검증 PASS (984 PASS, T05 조기종료, 계측기 WARNING 정합화)
-   - 3단: 실제 E2E 미완료 & 향후 과제 (T05 재검증 대기, T06 NOT TESTED)
-6. Slide 13 (엔지니어링 한계):
-   - T05 상태 간결 보완, HTTP 504 원인 UNKNOWN 유지
-7. 산출물: presentation/VisionInsight_Presentation_14slides_verified.pptx
+1. 최신 Day4 최종 검증 결과 반영:
+   - 전체 pytest 1089 PASS / 0 FAIL / 4 SKIP (경고 2건)
+   - 4대 대표 시나리오 실제 Gemini E2E 전원 성공(PASS) 기록 확인:
+     • T01 정상 (INSP-001396): 13.578초, 관측 사실 6개 PASS
+     • T03 조도 경고 (INSP-001398): 24.600초, 관측 사실 12개 PASS
+     • T05 로드 실패 (INSP-001405): 16.333초, 관측 사실 17개 PASS (조기 종료 성공)
+     • T06 저장 OK (INSP-001406): 26.371초, 관측 사실 6개 PASS (판정 불변 OK 유지)
+   - T06 10단계 개발 과정(504 극복 및 30초 적용)과 한계(30초 직접원인 미확정, 원본 ASGI 미보관) 반영
+2. Slide 1 (표지): 최신 1089 PASS / 4대 시나리오 E2E 전원 성공 반영
+3. Slide 4 (Vision 엔진): Recall 50.79%, FN 31건 미탐 한계 및 평가 문서 제약사항 보존
+4. Slide 7 (Evidence 검증): 4대 시나리오 관측 사실 100% 결정적 검증 반영
+5. Slide 9 (핵심 기술 난제): HTTP 400, HTTP 504 분리 계측, T05 조기종료/T06 불변성 완결 반영
+6. Slide 10 (실제 E2E 결과): 4대 시나리오(T01, T03, T05, T06) 4열 비교 및 실측 수치 전면 반영
+7. Slide 12 (구현 현황): 1단(Day4 완료), 2단(Day5 계획 분리), 3단(Day6~7 로드맵) 3단 체계 동기화
+8. Slide 13 (엔지니어링 한계): 모델 미탐, 504 원인 UNKNOWN 및 30초 한계, 설비 미연동 및 사후 진단 한정
+9. 산출물: presentation/VisionInsight_Presentation_14slides_verified.pptx
 """
 
 import os
@@ -101,7 +95,7 @@ def create_presentation_14slides_verified():
         return shape
 
     # ==========================================
-    # SLIDE 1: Title Slide (Updated to 984 PASS)
+    # SLIDE 1: Title Slide (Updated to 1089 PASS & 4 E2E PASS)
     # ==========================================
     s1 = prs.slides.add_slide(blank_layout)
     set_slide_background(s1)
@@ -144,7 +138,7 @@ def create_presentation_14slides_verified():
     bp0.font.color.rgb = PRIMARY_CYAN
 
     bp1 = tf_b.add_paragraph()
-    bp1.text = "검증 완료: 단일 이미지 CPU 추론 평균 42.53ms  |  E2E 실서버 검증 (T01 양품 PASS / T03 경고 PASS)  |  전체 pytest 984 PASS (경고 3건)"
+    bp1.text = "검증 완료: 단일 이미지 CPU 추론 평균 42.53ms  |  4대 시나리오 실제 Gemini E2E 성공 (T01/T03/T05/T06 PASS)  |  전체 pytest 1089 PASS / 4 SKIP (경고 2건)"
     bp1.font.name = FONT_FAMILY
     bp1.font.size = Pt(11)
     bp1.font.color.rgb = TEXT_MUTED
@@ -208,9 +202,9 @@ def create_presentation_14slides_verified():
     p.font.color.rgb = PRIMARY_CYAN
 
     solutions_points = [
-        ("PatchCore 기반 이상 탐지", "정상 이미지 180장만으로 학습, CPU 42.53ms 고속 추론으로 결함 여부 및 점수 산출"),
+        ("PatchCore 기반 이상 탐지", "정상 이미지 180장만으로 학습, 개발 환경 CPU 단일 이미지 PatchCore 추론 평균 42.53ms 측정"),
         ("재검사(REINSPECT) 규칙 분리", "조도 저하 등 영상 품질 경고 시 제품 불량(NG)과 구분하여 '재검사 필요'로 처리하는 결정 규칙 수립"),
-        ("Gemini Function Calling 진단", "Gemini가 서버 도구를 직접 호출하여 사실을 수집하고, 1:1 결정적 근거(Evidence)로 검증된 진단 보고서 작성"),
+        ("Gemini Function Calling 진단", "Gemini가 Function Calling으로 조회를 요청하면, 서버가 허용된 Python 도구를 검증·실행하여 실제 검사 근거를 수집"),
         ("판정 불변 가드레일", "Gemini는 사후 진단 보조만 수행하며, 서버가 확정한 판정(final_result)을 절대 변경할 수 없음")
     ]
     for title, desc in solutions_points:
@@ -239,7 +233,7 @@ def create_presentation_14slides_verified():
          PRIMARY_CYAN,
          "OpenCV 이미지 전처리 & 품질 분석 (밝기 81.24/135.86 등)",
          "PatchCore Anomaly Detection Engine (ResNet-18)",
-         "CPU 단일 이미지 평균 추론: 42.53ms 달성 (실시간성 확보)"),
+         "개발 환경 CPU 단일 이미지 PatchCore 추론 평균: 42.53ms 측정 (※ 순수 모델 추론 시간)"),
 
         ("2. Decision Layer (FastAPI)",
          WARNING_AMBER,
@@ -249,14 +243,14 @@ def create_presentation_14slides_verified():
 
         ("3. Storage & Audit Layer",
          TEXT_LIGHT,
-         "불변 검사 로그 및 시각순 감사 로그(events.jsonl) 영구 기록",
-         "도구 실행 시 고유 Evidence ID(E0001, E0002) 자동 발급",
-         "원본 정답(Ground Truth)과 운영 데이터의 엄격한 격리"),
+         "검사 결과(data/inspections.jsonl) 및 실행 이벤트(data/inspection_logs.jsonl) 로컬 기록",
+         "inspection_id 기반 추적 및 Evidence ID(E0001, E0002) 자동 발급",
+         "평가 Ground Truth와 운영 데이터 엄격 분리 (※ 로컬 저장은 개발용, Cloud Run 영구 저장은 GCS 연동 과제)"),
 
         ("4. Diagnostic Agent Layer (Gemini)",
          SUCCESS_GREEN,
-         "Gemini 3.8 Flash Function Calling 기반 심층 진단",
-         "도구 호출 ➔ 결과 수집 ➔ 토큰 카탈로그 기반 단순 JSON 생성",
+         "Gemini 3.8 Flash Function Calling 기반 사후 원인 진단 보조",
+         "Gemini가 도구 제안 ➔ 서버 인자 검증 후 Python 도구 실행 ➔ 단순 JSON 생성",
          "Python 결정적 Evidence 검증 통과 보고서만 운영자에게 제공")
     ]
 
@@ -276,7 +270,7 @@ def create_presentation_14slides_verified():
         p_sub = tf_lay.add_paragraph()
         p_sub.text = f"• {p1}   • {p2}   • {p3}"
         p_sub.font.name = FONT_FAMILY
-        p_sub.font.size = Pt(10)
+        p_sub.font.size = Pt(9.5)
         p_sub.font.color.rgb = TEXT_WHITE
         p_sub.space_before = Pt(3)
 
@@ -301,27 +295,27 @@ def create_presentation_14slides_verified():
     p.font.color.rgb = PRIMARY_CYAN
 
     metrics_list = [
-        ("학습 데이터셋", "정상 이미지 180장 (Unsupervised)", "비지도 학습 수행"),
-        ("임계값 산출셋", "정상 이미지 29장", "분포 기반 임계값 산출"),
+        ("학습 데이터셋", "정상 이미지 180장 (Unsupervised)", "비지도 Coreset 서브샘플링"),
+        ("임계값 산출셋", "독립 정상 이미지 29장", "분포 기반 임계값 산출 (mu + 3sigma)"),
         ("이상 점수 임계값", "34.1442", "이상이면 결함(NG)으로 분류"),
-        ("테스트셋 평가", "83장 (정상 20장 + 결함 63장)", "공식 평가셋"),
+        ("테스트셋 평가", "83장 (정상 20장 + 결함 63장)", "공식 평가셋 표본 기준"),
         ("Image AUROC", "0.8286", "이상 탐지 분별 성능"),
-        ("정밀도 (Precision)", "100.0%", "검출 불량 중 실제 불량 비율"),
-        ("재현율 (Recall)", "50.79%", "전체 63건 중 32건 탐지"),
-        ("단일 이미지 추론 시간", "CPU 평균 42.53ms", "Intel Core i7-14700F")
+        ("정밀도 (Precision)", "100.0% (83장 표본 한정)", "해당 표본 기준 실측 (실전 전수 보장 아님)"),
+        ("재현율 (Recall)", "50.79% (미탐 31건 발생)", "실제 불량 63건 중 32건 탐지, 31건 미탐"),
+        ("CPU 단일 추론 시간", "평균 42.53ms (PatchCore만)", "Agent 전체나 라인 처리속도 아님")
     ]
     for name, val, desc in metrics_list:
         p = tf_m.add_paragraph()
         p.text = f"{name}: {val}"
         p.font.name = FONT_FAMILY
-        p.font.size = Pt(12)
+        p.font.size = Pt(11.5)
         p.font.bold = True
         p.font.color.rgb = TEXT_WHITE
-        p.space_before = Pt(8)
+        p.space_before = Pt(6)
         p_d = tf_m.add_paragraph()
         p_d.text = f"   ({desc})"
         p_d.font.name = FONT_FAMILY
-        p_d.font.size = Pt(9.5)
+        p_d.font.size = Pt(9.0)
         p_d.font.color.rgb = TEXT_MUTED
 
     add_card(s4, Inches(6.8), Inches(1.4), Inches(5.7), Inches(5.3), border_color=WARNING_AMBER)
@@ -336,25 +330,25 @@ def create_presentation_14slides_verified():
     p.font.color.rgb = WARNING_AMBER
 
     cm_points = [
-        ("진양성 (TP): 32건", "실제 결함 63건 중 32건을 정확히 NG로 검출"),
-        ("위양성 (FP): 0건", "정상 제품 20건 중 오판 0건 (정밀도 100% 달성)"),
-        ("진음성 (TN): 20건", "정상 제품 20건을 모두 정상(OK)으로 판정"),
-        ("위음성 (FN): 31건", "미세 결함 31건을 미탐지 (엔지니어링 한계 인식)"),
+        ("진양성 (TP): 32건 / 진음성 (TN): 20건", "실제 결함 32건 검출, 정상 제품 20건 정상 판정"),
+        ("위양성 (FP): 0건 (정밀도 100%)", "83장 표본 내 과검 0건 (모든 공정의 FP 0% 보장 아님)"),
+        ("위음성 (FN): 31건 (재현율 50.79%)", "미세 결함 31건 미탐지 (모델 OK != 무결점 제품)"),
         ("T06 미탐 사례 보존", "파손 불량 T06이 점수 32.27로 합격 처리된 한계 보존"),
-        ("안전 규칙 준수", "실제 정답 라벨은 Agent에 일절 미제공 (평가 격리 유지)")
+        ("평가 문서 제약 보존", "과거 209장(46.17ms) 모델 대비 현재 180장(42.53ms) 차이 및 contamination FN 표기 불일치는 현황 제약으로 보존"),
+        ("정답 격리 & 설비 미제어", "실제 정답 라벨은 Agent에 미제공, 물리적 PLC 제어 미수행")
     ]
     for title, desc in cm_points:
         p = tf_cm.add_paragraph()
         p.text = "• " + title
         p.font.name = FONT_FAMILY
-        p.font.size = Pt(11.5)
+        p.font.size = Pt(11.0)
         p.font.bold = True
         p.font.color.rgb = TEXT_WHITE
-        p.space_before = Pt(6)
+        p.space_before = Pt(5)
         p_d = tf_cm.add_paragraph()
         p_d.text = "   " + desc
         p_d.font.name = FONT_FAMILY
-        p_d.font.size = Pt(9.5)
+        p_d.font.size = Pt(9.0)
         p_d.font.color.rgb = TEXT_LIGHT
 
     # ==========================================
@@ -555,7 +549,7 @@ def create_presentation_14slides_verified():
     tf_c7 = tb_c7.text_frame
     tf_c7.word_wrap = True
     p_c7 = tf_c7.paragraphs[0]
-    p_c7.text = "💡 실제 실서버 검증 성과: T01의 관측 사실 6개와 T03의 관측 사실 12개가 서버의 Evidence 검증을 통과했습니다. (서버에 등록된 필드에 대해 엄밀한 1:1 결정적 일치를 확인하며, 모든 자연어 가설이나 미래의 출력을 완전 검증한다고 과장하지 않음)"
+    p_c7.text = "💡 실제 실서버 검증 성과: 4대 대표 시나리오 T01(6개), T03(12개), T05(17개), T06(6개)의 관측 사실 전원이 서버의 Evidence 및 JSON Pointer 검증을 통과했습니다. (서버 등록 필드 1:1 결정적 일치를 확인하며, 모든 자연어 가설을 완전 검증한다고 과장하지 않음)"
     p_c7.font.name = FONT_FAMILY
     p_c7.font.size = Pt(10.0)
     p_c7.font.color.rgb = TEXT_WHITE
@@ -656,30 +650,30 @@ def create_presentation_14slides_verified():
             "problem_sub": "*(거부 속성은 Google 내부 원인으로 UNKNOWN)",
             "solution": "단순 JSON 생성 → Python 변환·검증",
             "solution_sub": "*(토큰 카탈로그 주입 + 서버 엄격 규칙 검증)",
-            "result": "T01/T03 실제 E2E PASS",
-            "result_sub": "실제 Gemini 통신 완전 성공 및 무오류 수락"
+            "result": "대표 4개 시나리오 E2E 성공 회차 확보",
+            "result_sub": "단순 JSON 스키마 적용 ➔ Python 엄격 검증 통과"
         },
         {
             "tag": "HTTP 504",
-            "title": "최종 JSON 생성 지연",
+            "title": "타임아웃 분리 및 계측",
             "color": WARNING_AMBER,
-            "problem": "T03 최종 JSON 요청 HTTP 504",
-            "problem_sub": "*(15초 제한 초과 발생, 서버 내부 원인 UNKNOWN)",
+            "problem": "과거 T03/T06 최종 생성 15s 초과 504 발생",
+            "problem_sub": "*(서버 내부 원인은 UNKNOWN, 반복 안정성 과제)",
             "solution": "요청별 timeout 계측 및 분리",
             "solution_sub": "*(조사 15s 유지 / 최종 JSON만 30s 선택, 전체 60s)",
-            "result": "최종 요청 18.967초 / 전체 24.600초 PASS",
-            "result_sub": "단일 실측치 (반복 안정성 보장 아님, 대본 보존)"
+            "result": "T03(18.97s) & T06(24.12s) PASS",
+            "result_sub": "선택적 30초 설정 회차 성공 (504 직접 해결은 미확정)"
         },
         {
-            "tag": "T05 ERROR",
-            "title": "조기 종료 및 근거 검증",
-            "color": DANGER_CORAL,
-            "problem": "필수 근거 확보 후 불필요 추가 조사 발생",
-            "problem_sub": "*(기존 실서버 1회 FAIL: 3차 조사 504, 원인 UNKNOWN)",
-            "solution": "조기 종료 정책 + 계측기 WARNING 정합화",
-            "solution_sub": "*(도구 2회+17개 사실 확보 후 즉시 최종 전환)",
-            "result": "Mock PASS / 실서버 재검증 대기",
-            "result_sub": "전체 pytest 984 PASS (경고 3건) / 조기 종료 통과"
+            "tag": "E2E 완결",
+            "title": "T05 조기종료 & T06 불변성",
+            "color": SUCCESS_GREEN,
+            "problem": "T05 3차조사 504 FAIL & T06 정답 격리",
+            "problem_sub": "*(T05 1회 FAIL 보존, T06 외부 정답 미제공)",
+            "solution": "T05 전용 조기 종료 & T06 판정 가드레일",
+            "solution_sub": "*(17개 사실 즉시종료, final_result=OK 불변)",
+            "result": "T05(16.33s) & T06(26.37s) PASS",
+            "result_sub": "T06 원본 ASGI 미보관 (재구성 코드 기반 검토 한계)"
         }
     ]
 
@@ -759,15 +753,15 @@ def create_presentation_14slides_verified():
         p_res_hdr.font.name = FONT_FAMILY
         p_res_hdr.font.size = Pt(11)
         p_res_hdr.font.bold = True
-        p_res_hdr.font.color.rgb = SUCCESS_GREEN if "PASS" in item["result"] and "대기" not in item["result"] else WARNING_AMBER
+        p_res_hdr.font.color.rgb = SUCCESS_GREEN
         p_res_hdr.space_before = Pt(6)
 
         p_res = tf_c.add_paragraph()
         p_res.text = item["result"]
         p_res.font.name = FONT_FAMILY
-        p_res.font.size = Pt(12)
+        p_res.font.size = Pt(11.5)
         p_res.font.bold = True
-        p_res.font.color.rgb = SUCCESS_GREEN if "PASS" in item["result"] and "대기" not in item["result"] else WARNING_AMBER
+        p_res.font.color.rgb = SUCCESS_GREEN
         p_res.space_before = Pt(1)
 
         p_res_sub = tf_c.add_paragraph()
@@ -778,12 +772,12 @@ def create_presentation_14slides_verified():
 
         cx9 += 4.0
 
-    # Bottom banner (Explicit T05 Status & 984 PASS)
+    # Bottom banner (Explicit 4 Scenarios E2E PASS & 1089 PASS with caveats)
     add_card(s9, Inches(0.8), Inches(5.95), Inches(11.733), Inches(0.8), bg_color=CARD_BG_ALT, border_color=PRIMARY_CYAN)
     tb_sum9 = s9.shapes.add_textbox(Inches(1.0), Inches(6.0), Inches(11.3), Inches(0.7))
     tf_sum9 = tb_sum9.text_frame
     p_sum9 = tf_sum9.paragraphs[0]
-    p_sum9.text = "💡 현황: T05 기존 실서버 E2E 1회 FAIL(후속 조사 HTTP 504) → 조기 종료 개선 후 오프라인 PASS, 실서버 재검증 대기 | 전체 pytest 984 PASS"
+    p_sum9.text = "💡 현황: T01·T03·T05·T06 대표 4개 시나리오에서 각각 실제 Gemini E2E 성공 회차 확보 (단일 성공 회차가 반복 실행 안정성을 보증하는 것은 아님) | 전체 pytest 1089 PASS / 4 SKIP"
     p_sum9.font.name = FONT_FAMILY
     p_sum9.font.size = Pt(10.5)
     p_sum9.font.bold = True
@@ -791,80 +785,171 @@ def create_presentation_14slides_verified():
     p_sum9.alignment = PP_ALIGN.CENTER
 
     # ==========================================
-    # SLIDE 10: Real Server E2E: T01 & T03 (Preserved)
+    # SLIDE 10: Real Server E2E: 4 Scenarios (T01, T03, T05, T06)
     # ==========================================
     s10 = prs.slides.add_slide(blank_layout)
     set_slide_background(s10)
-    add_header(s10, "실제 Gemini API E2E 검증 결과: T01 정상 및 T03 경고 검증 (PASS)")
+    add_header(s10, "실제 Gemini API E2E 검증 결과: 4대 대표 시나리오 전원 성공 (PASS)")
 
-    # Left: T01
-    add_card(s10, Inches(0.8), Inches(1.4), Inches(5.7), Inches(5.3), border_color=SUCCESS_GREEN)
-    tb_t01 = s10.shapes.add_textbox(Inches(1.1), Inches(1.65), Inches(5.1), Inches(4.8))
-    tf_t01 = tb_t01.text_frame
-    tf_t01.word_wrap = True
-    p = tf_t01.paragraphs[0]
-    p.text = "T01 정상 시나리오: 실서버 E2E 성공 (PASS)"
-    p.font.name = FONT_FAMILY
-    p.font.size = Pt(15)
-    p.font.bold = True
-    p.font.color.rgb = SUCCESS_GREEN
-
-    t01_items = [
-        ("검사 식별자", "INSP-001396 (정상 병 검사)"),
-        ("판정 결과", "모델 OK  /  서버 최종 판정 OK (Rule 5 발급)"),
-        ("FastAPI 응답", "HTTP 200 OK  (analysis_status: COMPLETED)"),
-        ("Gemini 통신", "2회 모두 HTTP 200 성공 (전체 소요: 13.578초)"),
-        ("토큰 사용량", "총 4,706 토큰 (입력 3,115, 출력 125, Thinking 1,466)"),
-        ("도구 실행", "get_inspection_result 실행 (2.23ms, E0001 발급)"),
-        ("근거 검증", "관측 사실 6개 (F0001~F0006) 1:1 결정적 검증 100% 통과"),
-        ("권장 조치", "CONTINUE_MONITORING (근거 참조: F0003 앵커링)")
+    scenarios_e2e = [
+        {
+            "tag": "T01 정상",
+            "insp_id": "INSP-001396",
+            "badge": "✔ E2E PASS",
+            "verdict": "최종 OK",
+            "verdict_sub": "(모델 OK ➔ Rule 5)",
+            "verdict_color": SUCCESS_GREEN,
+            "total_time": "13.58초",
+            "facts": "Fact 6개",
+            "facts_sub": "100% 검증 통과",
+            "rule": "Rule 5 (ALL_CHECKS_PASSED)",
+            "tools": "도구 1개 / 4,706 토큰",
+            "action": "CONTINUE_MONITORING"
+        },
+        {
+            "tag": "T03 품질 경고",
+            "insp_id": "INSP-001398",
+            "badge": "✔ E2E PASS",
+            "verdict": "최종 REINSPECT",
+            "verdict_sub": "(조도 저하 81.24 ➔ 재검)",
+            "verdict_color": WARNING_AMBER,
+            "total_time": "24.60초",
+            "facts": "Fact 12개",
+            "facts_sub": "100% 검증 통과",
+            "rule": "Rule 2 (IMAGE_QUALITY_WARN)",
+            "tools": "도구 2개 / 9,873 토큰",
+            "action": "조명 점검 & 안전 재검사"
+        },
+        {
+            "tag": "T05 로드 실패",
+            "insp_id": "INSP-001405",
+            "badge": "✔ E2E PASS",
+            "verdict": "최종 ERROR",
+            "verdict_sub": "(영상 손상 ➔ 조기 종료)",
+            "verdict_color": DANGER_CORAL,
+            "total_time": "16.33초",
+            "facts": "Fact 17개",
+            "facts_sub": "100% 검증 통과",
+            "rule": "Rule 1 (INSPECTION_FAILED)",
+            "tools": "도구 2개 / 11,426 토큰",
+            "action": "파일/카메라 점검 (오추론 방지)"
+        },
+        {
+            "tag": "T06 저장 OK",
+            "insp_id": "INSP-001406",
+            "badge": "✔ E2E PASS",
+            "verdict": "최종 OK (불변)",
+            "verdict_sub": "(서버 원본 판정 보존)",
+            "verdict_color": SUCCESS_GREEN,
+            "total_time": "26.37초",
+            "facts": "Fact 6개",
+            "facts_sub": "100% 검증 통과",
+            "rule": "서버 원본 판정 가드레일",
+            "tools": "도구 1개 / 7,202 토큰",
+            "action": "정답 미노출 & 판정 보존"
+        }
     ]
-    for label, val in t01_items:
-        p = tf_t01.add_paragraph()
-        p.text = f"• {label}: {val}"
-        p.font.name = FONT_FAMILY
-        p.font.size = Pt(10.5)
-        p.font.color.rgb = TEXT_WHITE if label in ["판정 결과", "FastAPI 응답", "근거 검증"] else TEXT_LIGHT
-        p.space_before = Pt(5)
 
-    # Right: T03
-    add_card(s10, Inches(6.8), Inches(1.4), Inches(5.7), Inches(5.3), border_color=SUCCESS_GREEN)
-    tb_t03 = s10.shapes.add_textbox(Inches(7.1), Inches(1.65), Inches(5.1), Inches(4.8))
-    tf_t03 = tb_t03.text_frame
-    tf_t03.word_wrap = True
-    p = tf_t03.paragraphs[0]
-    p.text = "T03 조도 저하 시나리오: 실서버 E2E 성공 (PASS)"
-    p.font.name = FONT_FAMILY
-    p.font.size = Pt(15)
-    p.font.bold = True
-    p.font.color.rgb = SUCCESS_GREEN
+    card_w10 = Inches(2.75)
+    card_gap10 = Inches(0.244)
+    cx10 = 0.80
 
-    t03_items = [
-        ("검사 식별자", "INSP-001398 (조도 저하 주입 검사)"),
-        ("판정 결과", "모델 OK  ➔  서버 최종 REINSPECT (Rule 2 발급)"),
-        ("FastAPI 응답", "HTTP 200 OK  (analysis_status: COMPLETED, 회차 final30_1)"),
-        ("Gemini 통신", "3회 모두 HTTP 200 성공 (전체 소요: 24.600초)"),
-        ("토큰 사용량", "총 9,873 토큰 (입력 5,576, 출력 345, Thinking 3,952)"),
-        ("도구 순차 실행", "도구1(E0001 2.43s) ➔ 도구2(E0002 3.05s) 순차 실행"),
-        ("최종 단순 JSON 생성", "18.967초 (HTTP 200, 30초 timeout 선택 적용)"),
-        ("근거 검증", "관측 사실 12개 (F0001~F0012) 1:1 결정적 검증 100% 통과"),
-        ("판정 불변 보존", "Gemini가 서버의 REINSPECT 판정을 번복하지 않고 보존")
-    ]
-    for label, val in t03_items:
-        p = tf_t03.add_paragraph()
-        p.text = f"• {label}: {val}"
-        p.font.name = FONT_FAMILY
-        p.font.size = Pt(10)
-        p.font.color.rgb = TEXT_WHITE if label in ["판정 결과", "최종 단순 JSON 생성", "근거 검증"] else TEXT_LIGHT
-        p.space_before = Pt(4)
+    for sc in scenarios_e2e:
+        add_card(s10, Inches(cx10), Inches(1.38), card_w10, Inches(4.48), border_color=SUCCESS_GREEN)
+        tb_sc = s10.shapes.add_textbox(Inches(cx10 + 0.12), Inches(1.44), card_w10 - Inches(0.24), Inches(4.35))
+        tf_sc = tb_sc.text_frame
+        tf_sc.word_wrap = True
 
-    # Note
-    p_note = tf_t03.add_paragraph()
-    p_note.text = "*(최종 JSON에 한해 30s timeout을 선택 적용하여 성공. 과거 504 원인은 UNKNOWN이며 단일 성공으로 향후 안정성을 보장하지 않음)"
-    p_note.font.name = FONT_FAMILY
-    p_note.font.size = Pt(8.5)
-    p_note.font.color.rgb = TEXT_MUTED
-    p_note.space_before = Pt(5)
+        # 1. 시나리오 이름 (18pt Bold)
+        p_tag = tf_sc.paragraphs[0]
+        p_tag.text = sc["tag"]
+        p_tag.font.name = FONT_FAMILY
+        p_tag.font.size = Pt(18)
+        p_tag.font.bold = True
+        p_tag.font.color.rgb = TEXT_WHITE
+
+        # 2. PASS 배지 (13pt Bold)
+        p_badge = tf_sc.add_paragraph()
+        p_badge.text = sc["badge"] + " (HTTP 200)"
+        p_badge.font.name = FONT_FAMILY
+        p_badge.font.size = Pt(12.5)
+        p_badge.font.bold = True
+        p_badge.font.color.rgb = SUCCESS_GREEN
+        p_badge.space_before = Pt(2)
+
+        # 3. 최종 판정 (14pt Bold)
+        p_vrd_lbl = tf_sc.add_paragraph()
+        p_vrd_lbl.text = "최종 판정"
+        p_vrd_lbl.font.name = FONT_FAMILY
+        p_vrd_lbl.font.size = Pt(11)
+        p_vrd_lbl.font.color.rgb = TEXT_MUTED
+        p_vrd_lbl.space_before = Pt(8)
+
+        p_vrd = tf_sc.add_paragraph()
+        p_vrd.text = sc["verdict"]
+        p_vrd.font.name = FONT_FAMILY
+        p_vrd.font.size = Pt(15)
+        p_vrd.font.bold = True
+        p_vrd.font.color.rgb = sc["verdict_color"]
+
+        p_vrd_sub = tf_sc.add_paragraph()
+        p_vrd_sub.text = sc["verdict_sub"]
+        p_vrd_sub.font.name = FONT_FAMILY
+        p_vrd_sub.font.size = Pt(10)
+        p_vrd_sub.font.color.rgb = TEXT_LIGHT
+
+        # 4. 전체 E2E 소요 시간 (17pt Bold)
+        p_time_lbl = tf_sc.add_paragraph()
+        p_time_lbl.text = "전체 E2E 소요시간"
+        p_time_lbl.font.name = FONT_FAMILY
+        p_time_lbl.font.size = Pt(11)
+        p_time_lbl.font.color.rgb = TEXT_MUTED
+        p_time_lbl.space_before = Pt(8)
+
+        p_time = tf_sc.add_paragraph()
+        p_time.text = sc["total_time"]
+        p_time.font.name = FONT_FAMILY
+        p_time.font.size = Pt(17)
+        p_time.font.bold = True
+        p_time.font.color.rgb = PRIMARY_CYAN
+
+        # 5. 검증 Fact 개수 (14.5pt Bold)
+        p_fact_lbl = tf_sc.add_paragraph()
+        p_fact_lbl.text = "검증 Fact (근거)"
+        p_fact_lbl.font.name = FONT_FAMILY
+        p_fact_lbl.font.size = Pt(11)
+        p_fact_lbl.font.color.rgb = TEXT_MUTED
+        p_fact_lbl.space_before = Pt(8)
+
+        p_fact = tf_sc.add_paragraph()
+        p_fact.text = f"{sc['facts']} ({sc['facts_sub']})"
+        p_fact.font.name = FONT_FAMILY
+        p_fact.font.size = Pt(13.5)
+        p_fact.font.bold = True
+        p_fact.font.color.rgb = SUCCESS_GREEN
+
+        # 6. 하단 메타정보 (ID & 권고)
+        p_meta = tf_sc.add_paragraph()
+        p_meta.text = f"• {sc['rule']}\n• {sc['tools']}\n• 권고: {sc['action']}\n• 검사 ID: {sc['insp_id']}"
+        p_meta.font.name = FONT_FAMILY
+        p_meta.font.size = Pt(9.5)
+        p_meta.font.color.rgb = TEXT_LIGHT
+        p_meta.space_before = Pt(8)
+
+        cx10 += 2.75 + 0.244
+
+    # Bottom banner (Detailed E2E summary & T06 limitations)
+    add_card(s10, Inches(0.8), Inches(5.95), Inches(11.733), Inches(0.85), bg_color=CARD_BG_ALT, border_color=PRIMARY_CYAN)
+    tb_sum10 = s10.shapes.add_textbox(Inches(1.0), Inches(6.0), Inches(11.3), Inches(0.75))
+    tf_sum10 = tb_sum10.text_frame
+    tf_sum10.word_wrap = True
+    p_sum10 = tf_sum10.paragraphs[0]
+    p_sum10.text = "💡 실서버 E2E 성과: 4대 대표 시나리오 전원 HTTP 200 / 관측 사실 100% 통과 달성\n*(T06: 30초 timeout 설정 회차 성공이나 504 직접 해결은 미확정이며, 원본 ASGI 본문 미보관으로 재구성 코드 기반 사후 검토 한계 명시)"
+    p_sum10.font.name = FONT_FAMILY
+    p_sum10.font.size = Pt(10.5)
+    p_sum10.font.bold = True
+    p_sum10.font.color.rgb = TEXT_WHITE
+    p_sum10.alignment = PP_ALIGN.CENTER
 
     # ==========================================
     # SLIDE 11: Demo Presentation (Preserved)
@@ -918,12 +1003,12 @@ def create_presentation_14slides_verified():
     p.font.color.rgb = WARNING_AMBER
 
     demo_safety = [
-        ("T01 종합 요약", "기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지는 않습니다."),
-        ("T01 권장 조치", "check_code: CONTINUE_MONITORING (근거 참조: F0003 앵커링)"),
-        ("T03 종합 요약", "기록된 종합 판정은 REINSPECT입니다. 제품 불량 확정과 구분하여 재검사가 필요합니다."),
-        ("T03 권장 조치", "LIGHTING_EXPOSURE_CHECK (F0004, F0007 참조), MANUAL_REINSPECTION (F0003 참조)"),
-        ("공통 안전 한계", "4대 limitations 필수 명시 (물리적 원인 불명, 모델 무결점 비보증, 기준치 미기록 등)"),
-        ("정적 데모 원칙", "발표 현장 네트워크 장애 및 과금 방지를 위해 사전 실서버 검증 데이터를 재생하는 독립 데모 사용")
+        ("T01 종합 요약", "기록된 판정은 OK입니다. 실제 무결점 제품을 보증하지는 않습니다. (CONTINUE_MONITORING)"),
+        ("T03 종합 요약", "종합 판정은 REINSPECT입니다. 제품 불량 확정과 구분하여 재검 필요. (조명점검/재검 권고)"),
+        ("T05 로드 실패", "영상 로드 실패 시 원천 사실 17개 기반 조기 종료, 모델 체크포인트 장애 오추론 방지"),
+        ("T06 판정 보존", "외부 평가상 미탐 사례라도 정답 미제공 상태에서 서버 원본 final_result=OK 불변 유지"),
+        ("공통 안전 한계", "limitations 필수 명시 (물리적 원인 불명, 모델 무결점 비보증, 설비 미제어 등)"),
+        ("정적 데모 원칙", "현장 네트워크 장애/과금 방지를 위해 사전 실서버 검증 데이터를 재생하는 독립 데모 사용")
     ]
     for title, desc in demo_safety:
         p = tf_dr.add_paragraph()
@@ -948,63 +1033,66 @@ def create_presentation_14slides_verified():
 
     col_width = Inches(3.7)
     cols_data_final = [
-        ("1. 실제 Gemini E2E PASS",
+        ("1. Day4 Agent PoC 완료 [공식 완료]",
          SUCCESS_GREEN,
-         ["FastAPI 백엔드 & 고유 ID 발급",
-          "PatchCore CPU 추론 엔진 (42.53ms)",
-          "규칙 기반 종합 판정 (REINSPECT 분리)",
-          "Gemini 4대 조회 도구 바인딩",
-          "결정적 근거 검증 (Evidence/Pointer)",
-          "단순 JSON 스키마 호환 구조",
-          "T01 정상 실서버 E2E (PASS, 13.578s)",
-          "T03 경고 실서버 E2E (PASS, 24.600s)"]),
+         [
+             ("전체 pytest 1089 PASS / 4 SKIP (경고 2건)", TEXT_WHITE, True),
+             ("4대 시나리오 실제 Gemini E2E 전원 성공", SUCCESS_GREEN, True),
+             ("T01(13.58s) · T03(24.60s)", TEXT_LIGHT, False),
+             ("T05(16.33s) · T06(26.37s)", TEXT_LIGHT, False),
+             ("Gemini 4대 조회 도구 바인딩 & 단순 JSON", PRIMARY_CYAN, False),
+             ("결정적 근거 검증 (Evidence / JSON Pointer)", PRIMARY_CYAN, False),
+             ("서버 최종 판정(final_result) 불변 보호", TEXT_WHITE, False)
+         ]),
 
-        ("2. 구현 및 오프라인 검증 PASS",
+        ("2. Day5 반례 검증 & 영상 [진행 중]",
          PRIMARY_CYAN,
-         ["전체 pytest 984개 PASS (경고 3건)",
-          "ERROR 필수 17개 원천 사실 정책 구현",
-          "T05 이미지 로드 실패 전용 조기 종료",
-          "  - 필수 도구·로그 확보 후 최종 즉시 전환",
-          "  - Mock 조사 2회 + 최종 1회 통과",
-          "계측기 WARNING 오분류 정정",
-          "  - IMAGE_LOAD_FAILURE 정상 인식",
-          "T03 경고 조기 종료 오프라인 검증"]),
+         [
+             ("[Step 1] Agent 정책 감사: COMPLETE", SUCCESS_GREEN, True),
+             ("T03 이력·T05 실패·T06 격리·무관 WARN 공백 식별", TEXT_LIGHT, False),
+             ("[Step 1-B] 반례 5종 Mock 평가: 36회 PASS", SUCCESS_GREEN, True),
+             ("오프라인 고정 계약 검증 통과 (PARTIAL)", TEXT_MUTED, False),
+             ("[개정 Day5] 영상 파이프라인 (예정)", WARNING_AMBER, True),
+             ("VideoFileSource 동영상 프레임 수동 Grab", TEXT_LIGHT, False),
+             ("마우스 ROI 추출 ➔ 기존 PatchCore 추론 연결", TEXT_LIGHT, False),
+             ("data/inspection_logs.jsonl 분리 정리", TEXT_LIGHT, False)
+         ]),
 
-        ("3. 실제 E2E 미완료 & 향후 과제",
+        ("3. Day6~7 UI 및 클라우드 배포 [예정]",
          WARNING_AMBER,
-         ["※ T05 실제 E2E: 기존 1회 FAIL, 수정 후 재검증 대기",
-          "※ T06 실제 E2E: NOT TESTED (미탐 사례 보존)",
-          "React 웹 관제 대시보드 (Day 6)",
-          "컨베이어 주행 동영상 Live View",
-          "실시간 프레임 Grab & 마우스 ROI",
-          "ROI 크롭 이미지 PatchCore 검사",
-          "Google Cloud Run 컨테이너 배포 (Day 7)"])
+         [
+             ("[Day 6] React / TypeScript 웹 관제 (예정)", WARNING_AMBER, True),
+             ("동영상 Live View & Grab Image 뷰어", TEXT_LIGHT, False),
+             ("마우스 드래그 ROI & 검사/로그 실시간 표출", TEXT_LIGHT, False),
+             ("Gemini 사후 진단 보고서 표출 UI 패널", TEXT_LIGHT, False),
+             ("[Day 7] Cloud Run 경량 CPU 배포 (예정)", WARNING_AMBER, True),
+             ("0.0.0.0 & PORT 컨테이너 패키징", TEXT_LIGHT, False),
+             ("로컬 JSONL 한계 극복 ➔ Cloud Storage 연동", TEXT_LIGHT, False),
+             ("HTTPS 실환경 통합 검증 및 시연", TEXT_LIGHT, False)
+         ])
     ]
     cx = 0.8
     for ctitle, ccol, citems in cols_data_final:
-        add_card(s12, Inches(cx), Inches(1.4), col_width, Inches(5.3), border_color=ccol)
-        tb_col = s12.shapes.add_textbox(Inches(cx + 0.18), Inches(1.65), col_width - Inches(0.36), Inches(4.8))
+        add_card(s12, Inches(cx), Inches(1.38), col_width, Inches(5.32), border_color=ccol)
+        tb_col = s12.shapes.add_textbox(Inches(cx + 0.16), Inches(1.50), col_width - Inches(0.32), Inches(5.1))
         tf_col = tb_col.text_frame
         tf_col.word_wrap = True
         p = tf_col.paragraphs[0]
         p.text = ctitle
         p.font.name = FONT_FAMILY
-        p.font.size = Pt(13.5)
+        p.font.size = Pt(14)
         p.font.bold = True
         p.font.color.rgb = ccol
 
-        for item in citems:
+        for text_str, color, is_bold in citems:
             pi = tf_col.add_paragraph()
-            pi.text = "• " + item
+            prefix = "• " if is_bold else "   - "
+            pi.text = prefix + text_str
             pi.font.name = FONT_FAMILY
-            pi.font.size = Pt(10)
-            if "NOT TESTED" in item or "FAIL" in item or "대기" in item:
-                pi.font.color.rgb = DANGER_CORAL
-            elif "PASS" in item:
-                pi.font.color.rgb = TEXT_WHITE
-            else:
-                pi.font.color.rgb = TEXT_LIGHT
-            pi.space_before = Pt(5)
+            pi.font.size = Pt(11) if is_bold else Pt(10)
+            pi.font.bold = is_bold
+            pi.font.color.rgb = color
+            pi.space_before = Pt(5) if is_bold else Pt(2)
 
         cx += 4.0
 
@@ -1016,19 +1104,19 @@ def create_presentation_14slides_verified():
     add_header(s13, "한계 및 향후 개선 계획: 솔직한 엔지니어링 고찰")
 
     limits = [
-        ("1. PatchCore 미탐 한계 (Recall 50.8%)",
+        ("1. PatchCore 미탐 한계 (Recall 50.79%, FN 31건)",
          WARNING_AMBER,
-         "현재 한계", "현재 ResNet-18 기반 모델은 83장 테스트셋에서 미세 파손과 오염 31건을 놓침. (T06 합격 사례 존재, 모델 OK가 무결점을 보증하지 않음)",
+         "현재 한계", "ResNet-18 기반 모델은 83장 테스트셋에서 미세 파손과 오염 31건을 미검출함 (T06 합격 사례 존재, 모델 OK != 무결점). 정밀도 100%는 83장 표본 내 지표이며, 과거 209장(46.17ms) 대비 180장(42.53ms) 차이 및 contamination FN 표기 불일치는 현황 제약으로 보존",
          "개선 계획", "WideResNet-50 등 백본 교체나 다해상도 패치 결합을 개선 후보로 검토 (성능 보장 아님)"),
 
-        ("2. Gemini HTTP 504 및 타임아웃 이슈",
+        ("2. Gemini HTTP 504 및 타임아웃 안정성 이슈",
          DANGER_CORAL,
-         "현재 한계", "과거 T03 최종 JSON 요청 및 T05 3차 조사에서 HTTP 504가 발생했으며 서버 내부 원인은 UNKNOWN입니다. T03은 30초 timeout 적용 단일 재검증(최종 18.967s / 전체 24.600s)으로 PASS했으나 반복 안정성을 보장하지 않으며, T05는 조기 종료 개선 후 실서버 재검증 대기 상태입니다.",
-         "개선 계획", "조기 종료 가드레일 정밀화, 프롬프트 압축, 비동기 작업 큐 전환, 장기 모니터링 체계 확립 필요"),
+         "현재 한계", "과거 T03/T05/T06에서 HTTP 504가 발생했으며 서버 내부 원인은 UNKNOWN임. 30초 timeout 적용으로 4대 시나리오 E2E 전원 성공했으나 30초가 504의 직접 해결책인지는 미확정이며, T06은 원본 ASGI 본문 미보관으로 재구성 코드 기반 검토 한계가 남음",
+         "개선 계획", "조기 종료 가드레일 확립, 프롬프트 압축, 비동기 작업 큐 전환 및 장기 모니터링 체계 확립 필요"),
 
-        ("3. 외부 LLM 호출 지연시간 (13.58s / 24.60s)",
+        ("3. 외부 LLM 호출 지연시간 (13.58s ~ 26.37s)",
          PRIMARY_CYAN,
-         "현재 한계", "Gemini API 호출에 수십 초가 소요되어 생산 라인 초고속 동기 인라인 제어에는 부적합하며, 실제 PLC/배출기 제어는 수행하지 않음",
+         "현재 한계", "Gemini API 호출에 수십 초가 소요되어 생산 라인 초고속 동기 인라인 제어에는 부적합하며, 실제 PLC·컨베이어·배출기 제어는 수행하지 않음 (사후 진단 보조 역할에 집중)",
          "개선 계획", "사후 비동기 진단 워크플로우로 한정하여 운영하고 라인 제어는 서버의 실시간 규칙 판정값에만 전담")
     ]
 
@@ -1080,8 +1168,8 @@ def create_presentation_14slides_verified():
     p.font.color.rgb = PRIMARY_CYAN
 
     final_roles = [
-        ("PatchCore", "이상 점수 산출 및 모델 판정 소견(result) 제공 (CPU 42.53ms 실시간 추론)"),
-        ("FastAPI", "서버 규칙 기반 최종 검사 판정(final_result: REINSPECT 분리) 확정 및 감사 추적 로그 보존"),
+        ("PatchCore", "이상 점수 산출 및 모델 판정 소견(result) 제공 (개발 환경 CPU 단일 이미지 평균 42.53ms 측정, ※ 사후 진단 보조)"),
+        ("FastAPI", "서버 규칙 기반 최종 검사 판정(final_result: REINSPECT 분리) 확정 및 로컬 JSONL 기록 (Cloud Run 영구 저장은 GCS 연동 과제)"),
         ("Gemini", "Function Calling 도구 조회를 통한 근거 기반 사후 진단 및 권고안 제안 (사후 진단 보조)"),
         ("Python 서버", "엄격한 근거 검증(Evidence ID / JSON Pointer) 및 판정 불변 보호 정책으로 신뢰성 확보")
     ]

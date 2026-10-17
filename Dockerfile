@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install production Python dependencies (CPU-only PyTorch, Anomalib, FastAPI)
 COPY requirements-prod.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
+
     pip install --no-cache-dir -r requirements-prod.txt
 
 # Copy application source code and verified PatchCore model artifacts

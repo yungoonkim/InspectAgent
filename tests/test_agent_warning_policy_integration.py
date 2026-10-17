@@ -33,14 +33,18 @@ def operating_service(storage, responses, required=()):
     return service, generator
 
 
-def test_real_service_stops_after_two_tools_without_a_readiness_request():
+def test_real_service_collects_warning_history_without_a_readiness_request():
     storage = warning_storage()
     service, generator = operating_service(storage, [*calls(), warning_report])
     result = asyncio.run(service.analyze("INSP-000001"))
     assert type(service) is AgentService and result.analysis_status == "COMPLETED"
     assert generator.await_count == 3 and result.tools_used == ["get_inspection_result", "analyze_image_quality"]
-    assert [trace.round_number for trace in result.tool_execution_trace] == [1, 2]
-    assert all(trace.executed and trace.success for trace in result.tool_execution_trace)
+    assert [trace.round_number for trace in result.tool_execution_trace] == [1, 2, 2]
+    assert all(trace.executed and trace.success for trace in result.tool_execution_trace[:2])
+    history = result.tool_execution_trace[-1]
+    assert history.origin == "BACKEND_POLICY" and history.executed and not history.success
+    assert history.error_code == "DATA_UNAVAILABLE" and history.evidence_id is None
+    storage.list_inspections.assert_called_once_with(limit=1000, product_id="PROD-001")
     storage.get_logs.assert_not_called()
     assert set(json.loads(generator.call_args_list[-1].kwargs["contents"][0].parts[0].text)) == {
         "inspection_id", "catalog", "tool_execution_trace",
@@ -84,14 +88,14 @@ def test_missing_logs_are_optional_only_when_the_contract_allows_it(required):
     assert "get_execution_logs" not in result.tools_used
 
 
-def test_extra_valid_history_is_not_a_fast_path_but_does_not_invalidate_a_supported_report():
+def test_valid_history_completes_warning_fast_path_without_a_readiness_request():
     storage = warning_storage()
     storage.list_inspections.return_value = [storage.get_inspection.return_value]
     parallel = call_response(("analyze_image_quality", {"inspection_id": "INSP-000001"}),
         ("get_inspection_history", {"product_id": "TARGET-PRODUCT"}))
-    service, generator = operating_service(storage, [calls()[0], parallel, text_response(), warning_report])
+    service, generator = operating_service(storage, [calls()[0], parallel, warning_report])
     result = asyncio.run(service.analyze("INSP-000001"))
-    assert result.analysis_status == "COMPLETED" and generator.await_count == 4
+    assert result.analysis_status == "COMPLETED" and generator.await_count == 3
     assert result.tools_used == ["get_inspection_result", "analyze_image_quality", "get_inspection_history"]
 
 

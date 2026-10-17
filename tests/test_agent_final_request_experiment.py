@@ -150,5 +150,8 @@ def test_server_deadline_and_local_deadlines_have_distinct_safe_errors(fault):
         "overall_timeout": "AGENT_TIMEOUT"}[fault]
     assert result.error_code == code and result.analysis_status == "FAILED"
     assert ERROR_STATUS[code] == (502 if fault == "server_504" else 504)
-    assert len(result.tool_execution_trace) == 2 and len(requested) == 3
+    assert len(result.tool_execution_trace) == 3 and len(requested) == 3
+    history = result.tool_execution_trace[-1]
+    assert history.origin == "BACKEND_POLICY" and history.error_code == "DATA_UNAVAILABLE"
+    assert history.executed and not history.success and history.evidence_id is None
     assert "PRIVATE" not in result.model_dump_json()

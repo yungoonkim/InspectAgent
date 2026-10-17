@@ -35,6 +35,7 @@ class InspectionArguments(StrictModel):
 class HistoryArguments(StrictModel):
     product_id: Annotated[StrictStr, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", max_length=64)]
     limit: Annotated[StrictInt, Field(ge=1, le=20)] = 5
+    inspection_id: Optional[Annotated[StrictStr, Field(pattern=r"^INSP-[0-9]{6,12}$", max_length=17)]] = None
 
 
 class AgentLimits(StrictModel):
@@ -53,7 +54,7 @@ class ObservedFact(StrictModel):
     fact_id: FactId
     evidence_id: EvidenceId
     source_tool: ToolName
-    source_field: Annotated[str, Field(pattern=r"^/data(?:/[A-Za-z0-9_]+)+$", max_length=120)]
+    source_field: Annotated[str, Field(pattern=r"^/(?:data(?:/[A-Za-z0-9_]+)+|brightness_comparison/summary/[a-z_]+)$", max_length=120)]
     source_event: Optional[Annotated[str, Field(max_length=64)]] = None
     observed_value: Scalar
 
@@ -117,6 +118,8 @@ class ToolExecutionTrace(StrictModel):
     error_code: Optional[str]
     elapsed_ms: float
     evidence_id: Optional[EvidenceId] = None
+    origin: Literal["GEMINI", "BACKEND_POLICY"] = "GEMINI"
+    comparison_inspection_id: Optional[str] = None
 
 
 class Hypothesis(CauseSelection):

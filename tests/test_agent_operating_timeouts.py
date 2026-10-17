@@ -120,7 +120,10 @@ def test_final_sdk_server_504_keeps_safe_http_mapping_and_no_retry():
     service, generator = service_for(warning_storage(), [*calls(), failure], AgentLimits(final_model_timeout_seconds=30))
     result = asyncio.run(service.analyze("INSP-000001"))
     assert result.error_code == "GEMINI_REQUEST_FAILED" and ERROR_STATUS[result.error_code] == 502
-    assert generator.await_count == 3 and len(result.tool_execution_trace) == 2
+    assert generator.await_count == 3 and len(result.tool_execution_trace) == 3
+    history = result.tool_execution_trace[-1]
+    assert history.origin == "BACKEND_POLICY" and history.executed and history.error_code == "DATA_UNAVAILABLE"
+    assert not history.success and history.evidence_id is None
     assert generator.call_args.kwargs["config"].http_options.timeout == 30000
     assert "PRIVATE" not in result.model_dump_json()
 

@@ -61,6 +61,7 @@ def test_production_simple_report_flow_keeps_tools_evidence_and_verdicts(scenari
         additional = "get_execution_logs"
     storage = Mock(spec=InspectionStorageBase)
     storage.get_inspection.return_value = make_record(**changes)
+    storage.list_inspections.return_value = []
     if scenario == "failed":
         storage.get_inspection.return_value = error_record()
     storage.get_logs.return_value = [make_log(event_code="IMAGE_LOAD_FAILED")]
@@ -94,7 +95,11 @@ def test_production_simple_report_flow_keeps_tools_evidence_and_verdicts(scenari
     assert result.analysis_status == "COMPLETED"
     assert generator.await_count == (3 if additional else 2)
     assert result.tools_used == ["get_inspection_result", *([additional] if additional else [])]
-    assert all(entry.executed and entry.success for entry in result.tool_execution_trace)
+    if scenario == "warning":
+        history = result.tool_execution_trace[-1]
+        assert history.origin == "BACKEND_POLICY" and history.executed and history.error_code == "DATA_UNAVAILABLE"
+        assert not history.success and history.evidence_id is None
+    assert all(entry.executed and entry.success for entry in result.tool_execution_trace if entry.origin == "GEMINI")
     assert storage.get_inspection.return_value.model_dump() == original
     assert all(result.inspection_snapshot[name] == original[name] for name in CORE_FIELDS)
     packet = json.loads(generator.call_args_list[-1].kwargs["contents"][0].parts[0].text)

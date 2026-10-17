@@ -211,3 +211,60 @@ def test_post_inspections_storage_write_failure_returns_500(client: TestClient):
         assert response.status_code == 500
         assert "storage" in response.json()["detail"].lower()
 
+
+def test_list_recent_inspections(client: TestClient):
+    """Verify GET /inspections returns recent inspection records."""
+    response = client.get("/inspections?limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total" in data
+    assert "inspections" in data
+    assert isinstance(data["inspections"], list)
+    if data["inspections"]:
+        first = data["inspections"][0]
+        assert "inspection_id" in first
+        assert "final_result" in first
+        assert "decision_threshold" in first
+        if first["decision_threshold"] is not None:
+            assert first["decision_threshold"] == 34.1442
+
+
+def test_get_inspection_by_id(client: TestClient):
+    """Verify GET /inspections/{id} retrieves specific inspection."""
+    # First get list
+    list_res = client.get("/inspections?limit=1")
+    assert list_res.status_code == 200
+    inspections = list_res.json()["inspections"]
+    if not inspections:
+        pytest.skip("No inspections in storage to test lookup.")
+
+    target_id = inspections[0]["inspection_id"]
+    response = client.get(f"/inspections/{target_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["inspection_id"] == target_id
+    assert "final_result" in data
+
+    # Test 404
+    resp_404 = client.get("/inspections/INSP-NONEXISTENT-999999")
+    assert resp_404.status_code == 404
+
+
+def test_get_stored_agent_report(client: TestClient):
+    """Verify GET /inspections/{id}/agent-report returns stored report without calling Gemini."""
+    # INSP-001396 is a pre-stored fixture
+    response = client.get("/inspections/INSP-001396/agent-report")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["inspection_id"] == "INSP-001396"
+    assert data["provenance"] == "RECORDED_TEST_FIXTURE"
+    assert "overall_summary" in data
+    assert "observed_facts" in data
+    assert "recommended_checks" in data
+    assert "limitations" in data
+
+    # Test 404
+    resp_404 = client.get("/inspections/INSP-NONEXISTENT-999999/agent-report")
+    assert resp_404.status_code == 404
+
+

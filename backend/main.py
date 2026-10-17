@@ -30,6 +30,8 @@ from backend.inspection import (
 from backend.storage import StorageError, get_inspection_storage
 from backend.ml.patchcore_inferencer import get_patchcore_inferencer
 from backend.agent.api import AgentRuntime, router as agent_router
+from backend.video_api import VideoRuntime, allowed_origins, router as video_router
+from backend.roi_api import router as roi_router
 
 settings = get_settings()
 
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     """
     current_settings = get_settings()
     app.state.agent_runtime = AgentRuntime()
+    app.state.video_runtime = VideoRuntime(current_settings)
     if getattr(current_settings, "ENABLE_PATCHCORE", True):
         try:
             get_patchcore_inferencer()
@@ -52,6 +55,9 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await app.state.agent_runtime.aclose()
+        app.state.video_runtime.captures.close()
+        if hasattr(app.state, "roi_runtime"):
+            app.state.roi_runtime.close()
 
 
 app = FastAPI(
@@ -61,11 +67,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(agent_router)
+app.include_router(video_router)
+app.include_router(roi_router)
 
 # CORS middleware for development and deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins(settings),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -455,31 +463,7 @@ def create_inspection_endpoint(
             decision_threshold=current_settings.DECISION_THRESHOLD,
         )
 
-        image_metadata = ImageMetadataResponse(
-            filename=f"{record.image_id}.png",
-            width=int(record.metrics.get("width", 0)),
-            height=int(record.metrics.get("height", 0)),
-            channels=int(record.metrics.get("channels", 3)),
-        )
-
-        return InspectionResponse(
-            inspection_id=record.inspection_id,
-            product_id=record.product_id,
-            image_id=record.image_id,
-            status=record.status,
-            result=record.result,
-            timestamp=record.timestamp,
-            image_quality_status=record.image_quality_status,
-            metrics=record.metrics,
-            image_metadata=image_metadata,
-            anomaly_score=record.anomaly_score,
-            inference_time_ms=record.inference_time_ms,
-            model_version=record.metrics.get("model_version"),
-            decision_threshold=record.decision_threshold,
-            defect_detection_status=record.defect_detection_status,
-            final_result=record.final_result,
-            final_reason_code=record.final_reason_code,
-        )
+        return _record_to_response(record)
     except KeyError as err:
         raise HTTPException(status_code=400, detail=str(err))
     except FileNotFoundError as err:
@@ -489,6 +473,50 @@ def create_inspection_endpoint(
     except StorageError as err:
         raise HTTPException(status_code=500, detail=f"Storage error: Failed to persist inspection record: {err}")
 
+
+def _record_to_response(record: Any) -> InspectionResponse:
+    metrics = record.metrics if isinstance(record.metrics, dict) else {}
+    image_metadata = ImageMetadataResponse(
+        filename=f"{record.image_id}.png",
+        width=int(metrics.get("width", 0)),
+        height=int(metrics.get("height", 0)),
+        channels=int(metrics.get("channels", 3)),
+    )
+    return InspectionResponse(
+        inspection_id=record.inspection_id,
+        product_id=record.product_id,
+        image_id=record.image_id,
+        status=record.status,
+        result=record.result,
+        timestamp=record.timestamp,
+        image_quality_status=record.image_quality_status,
+        metrics=metrics,
+        image_metadata=image_metadata,
+        anomaly_score=record.anomaly_score,
+        inference_time_ms=record.inference_time_ms,
+        model_version=metrics.get("model_version"),
+        decision_threshold=record.decision_threshold if record.decision_threshold is not None else (34.1442 if record.anomaly_score is not None else None),
+        defect_detection_status=record.defect_detection_status,
+        final_result=record.final_result,
+        final_reason_code=record.final_reason_code,
+    )
+
+
+@app.get(
+    "/inspections",
+    summary="List recent inspection records",
+    description="Retrieves recent inspection records from storage for UI history and inspection selection without ML inference.",
+)
+def list_inspections_endpoint(
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """List recent inspection records from storage."""
+    storage = get_inspection_storage()
+    records = storage.list_inspections(limit=min(100, max(1, limit)))
+    return {
+        "total": len(records),
+        "inspections": [_record_to_response(r).model_dump() for r in records],
+    }
 
 
 @app.get(
@@ -507,6 +535,53 @@ def list_inspection_images(
         "sample_ids": image_ids[:10],
         "image_ids": image_ids,
     }
+
+
+@app.get(
+    "/inspections/{inspection_id}",
+    response_model=InspectionResponse,
+    summary="Retrieve single inspection record",
+    description="Fetches an existing inspection record by its inspection_id without running new ML inference.",
+)
+def get_inspection_endpoint(
+    inspection_id: str,
+) -> InspectionResponse:
+    """Fetch an existing inspection record by inspection_id."""
+    storage = get_inspection_storage()
+    record = storage.get_inspection(inspection_id)
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Inspection record '{inspection_id}' not found on server.",
+        )
+    return _record_to_response(record)
+
+
+@app.get(
+    "/inspections/{inspection_id}/agent-report",
+    summary="Retrieve stored or recorded Gemini Agent diagnosis report",
+    description="Read-only query for previously saved or recorded agent reports. Never triggers live Gemini API calls.",
+)
+def get_agent_report_endpoint(
+    inspection_id: str,
+) -> Dict[str, Any]:
+    """Retrieve stored agent diagnosis report without calling Gemini."""
+    import json
+    report_path = Path("data/outputs/agent_reports") / f"{inspection_id}.json"
+    if report_path.exists() and report_path.is_file():
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as err:
+            raise HTTPException(status_code=500, detail=f"Failed to read report file: {err}")
+
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error_code": "NO_STORED_REPORT",
+            "message": f"검사 '{inspection_id}'에 대해 사전 저장된 Gemini 진단 보고서가 없습니다. [Gemini AI 진단 실행] 버튼으로 새로 분석할 수 있습니다.",
+        },
+    )
 
 
 if __name__ == "__main__":

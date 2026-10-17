@@ -53,6 +53,21 @@ try:
         INSPECTIONS_FILE: str = Field(default="data/inspections.jsonl", description="Path to inspections JSONL file")
         INSPECTION_LOGS_FILE: str = Field(default="data/inspection_logs.jsonl", description="Path to inspection logs JSONL file")
         TEST_DATA_DIR: str = Field(default="test_data", description="Path to test scenarios and test injected images")
+        VIDEO_ROOT: str = "data/outputs/videos"
+        VIDEO_MAX_BYTES: int = Field(default=128 * 1024 * 1024, gt=0)
+        VIDEO_MAX_WIDTH: int = Field(default=1920, gt=0)
+        VIDEO_MAX_HEIGHT: int = Field(default=1080, gt=0)
+        VIDEO_MAX_FRAMES: int = Field(default=900, gt=0)
+        VIDEO_MAX_DECODERS: int = Field(default=2, ge=1, le=8)
+        CAPTURE_DIR: str = "data/outputs/captures"
+        CAPTURE_TTL_SECONDS: int = Field(default=1800, gt=0)
+        CAPTURE_SESSION_SECONDS: int = Field(default=3600, gt=0)
+        CAPTURE_MAX_BYTES: int = Field(default=256 * 1024 * 1024, gt=0)
+        CAPTURE_MAX_COUNT: int = Field(default=128, gt=0)
+        CAPTURE_MAX_PER_SESSION: int = Field(default=32, gt=0)
+        CAPTURE_MAX_SESSIONS: int = Field(default=256, gt=0)
+        CAPTURE_COOKIE_SECURE: bool = False
+        CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
         # Vision Quality & Fault Injection Settings
         # Normal bottle brightness mean is ~136.3 (p1: 133.5, p99: 139.5)
@@ -176,6 +191,21 @@ except ImportError:
             self.BRIGHTNESS_HIGH_THRESHOLD = float(os.getenv("BRIGHTNESS_HIGH_THRESHOLD", "150.0"))
             self.FAULT_INJECTION_FACTOR = float(os.getenv("FAULT_INJECTION_FACTOR", "0.6"))
             self.TEST_DATA_DIR = os.getenv("TEST_DATA_DIR", "test_data")
+            self.VIDEO_ROOT = os.getenv("VIDEO_ROOT", "data/outputs/videos")
+            self.VIDEO_MAX_BYTES = int(os.getenv("VIDEO_MAX_BYTES", str(128 * 1024 * 1024)))
+            self.VIDEO_MAX_WIDTH = int(os.getenv("VIDEO_MAX_WIDTH", "1920"))
+            self.VIDEO_MAX_HEIGHT = int(os.getenv("VIDEO_MAX_HEIGHT", "1080"))
+            self.VIDEO_MAX_FRAMES = int(os.getenv("VIDEO_MAX_FRAMES", "900"))
+            self.VIDEO_MAX_DECODERS = int(os.getenv("VIDEO_MAX_DECODERS", "2"))
+            self.CAPTURE_DIR = os.getenv("CAPTURE_DIR", "data/outputs/captures")
+            self.CAPTURE_TTL_SECONDS = int(os.getenv("CAPTURE_TTL_SECONDS", "1800"))
+            self.CAPTURE_SESSION_SECONDS = int(os.getenv("CAPTURE_SESSION_SECONDS", "3600"))
+            self.CAPTURE_MAX_BYTES = int(os.getenv("CAPTURE_MAX_BYTES", str(256 * 1024 * 1024)))
+            self.CAPTURE_MAX_COUNT = int(os.getenv("CAPTURE_MAX_COUNT", "128"))
+            self.CAPTURE_MAX_PER_SESSION = int(os.getenv("CAPTURE_MAX_PER_SESSION", "32"))
+            self.CAPTURE_MAX_SESSIONS = int(os.getenv("CAPTURE_MAX_SESSIONS", "256"))
+            self.CAPTURE_COOKIE_SECURE = os.getenv("CAPTURE_COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+            self.CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
             self.ENABLE_PATCHCORE = os.getenv("ENABLE_PATCHCORE", "true").lower() in ("1", "true", "yes")
             self.PATCHCORE_CHECKPOINT_PATH = os.getenv("PATCHCORE_CHECKPOINT_PATH", "models/patchcore/patchcore_bottle.ckpt")
             self.PATCHCORE_METADATA_PATH = os.getenv("PATCHCORE_METADATA_PATH", "models/patchcore/model_metadata.json")

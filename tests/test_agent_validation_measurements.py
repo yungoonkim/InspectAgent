@@ -77,7 +77,7 @@ def measure(scenario, required=(), fail_final=False):
 
 @pytest.mark.parametrize("scenario,required,requests,executions,policy", [
     ("T01", (), 2, 1, "NORMAL"), ("T06", (), 2, 1, "NORMAL"),
-    ("T03", (), 3, 2, "WARNING"), ("T03", REQUIRED_EVENTS, 4, 3, "WARNING"),
+    ("T03", (), 3, 3, "WARNING"), ("T03", REQUIRED_EVENTS, 4, 4, "WARNING"),
     ("T05", (), 3, 2, "IMAGE_LOAD_FAILURE"),
 ])
 def test_real_policy_measurements_keep_http_and_tools_distinct(scenario, required, requests, executions, policy):
@@ -85,7 +85,7 @@ def test_real_policy_measurements_keep_http_and_tools_distinct(scenario, require
     assert result.analysis_status == "COMPLETED"
     assert report["actual_http_requests"] == report["sdk_request_count"] == generator.await_count == requests
     assert report["agent_tool_executions"] == executions
-    assert report["trace_rounds"] == list(range(1, executions + 1))
+    assert report["trace_rounds"] == list(range(1, requests))
     assert report["early_exit_checks"][-1]["policy"] == policy
     if scenario == "T05":
         assert report["early_exit_checks"][-1]["ready"] is True
@@ -96,7 +96,12 @@ def test_real_policy_measurements_keep_http_and_tools_distinct(scenario, require
     assert final["config"].tools is None and final["config"].tool_config is None
     assert len(final["contents"]) == 1 and final["contents"][0].role == "user"
     if policy != "CONTINUE":
-        assert report["early_exit_checks"][-1]["evidence_ids"] == [f"E{index:04d}" for index in range(1, executions + 1)]
+        assert report["early_exit_checks"][-1]["evidence_ids"] == [
+            trace.evidence_id for trace in result.tool_execution_trace if trace.success]
+    if scenario == "T03":
+        history = next(trace for trace in result.tool_execution_trace if trace.tool_name == "get_inspection_history")
+        assert history.origin == "BACKEND_POLICY" and history.error_code == "DATA_UNAVAILABLE"
+        assert history.executed and not history.success and history.evidence_id is None
     if scenario == "T03" and not required:
         storage.get_logs.assert_not_called()
     assert all(entry["elapsed_ms"] >= 0 for entry in report["sdk_requests"])
@@ -122,7 +127,7 @@ def test_final_504_is_not_misreported_as_another_investigation_request(scenario)
     report, result, generator, storage = measure(scenario, fail_final=True)
     assert result.error_code == "GEMINI_REQUEST_FAILED"
     assert report["actual_http_requests"] == generator.await_count == 3
-    assert report["agent_tool_executions"] == 2
+    assert report["agent_tool_executions"] == (3 if scenario == "T03" else 2)
     assert report["failure_stage"] == "STRUCTURED_OUTPUT" and report["failed_sdk_request"] == 3
     assert report["known_tokens"]["total_token_count"] == 30
     assert not report["usage_complete"]

@@ -31,6 +31,8 @@ from backend.inspection import (
 )
 from backend.storage import (
     EventCode,
+    InspectionLogRecord,
+    InspectionRecord,
     JsonlInspectionStorage,
     get_inspection_storage,
 )
@@ -264,11 +266,41 @@ def test_09_image_load_failure_logs_and_returns_error(client: TestClient):
 # ==============================================================================
 # Item 10: 생성된 JSONL 모든 줄의 파싱 성공
 # ==============================================================================
-def test_10_all_jsonl_lines_valid_json():
-    """Item 10: Verify every single line in inspections.jsonl and inspection_logs.jsonl is valid JSON."""
-    settings = get_settings()
-    insp_path = settings.absolute_inspections_path
-    logs_path = settings.absolute_inspection_logs_path
+@pytest.fixture
+def serialization_jsonl_paths(tmp_path: Path) -> tuple[Path, Path]:
+    """Create synthetic schema-valid storage records without images, inference, or global settings."""
+    inspections_path = tmp_path / "inspections.jsonl"
+    logs_path = tmp_path / "inspection_logs.jsonl"
+    storage = JsonlInspectionStorage(inspections_path=inspections_path, logs_path=logs_path)
+    for sequence in range(2):
+        record = InspectionRecord(
+            inspection_id=f"INSP-{900001 + sequence:06d}",
+            product_id="TEST-JSONL-SERIALIZATION",
+            image_id="IMG-BOTTLE-9001",
+            timestamp="2026-01-01T00:00:00+00:00",
+            result="UNKNOWN",
+            image_quality_status="NORMAL",
+            status="COMPLETED",
+            defect_detection_status="SKIPPED",
+            final_result="REINSPECT",
+            final_reason_code="DEFECT_DETECTION_UNAVAILABLE",
+        )
+        storage.save_inspection(record)
+        storage.save_log(InspectionLogRecord(
+            timestamp=record.timestamp,
+            inspection_id=record.inspection_id,
+            level="INFO",
+            stage="complete",
+            event_code=EventCode.INSPECTION_COMPLETED,
+            message="Synthetic JSONL serialization fixture; no inspection was executed",
+            source="test_fixture",
+        ))
+    return inspections_path, logs_path
+
+
+def test_10_all_jsonl_lines_valid_json(serialization_jsonl_paths: tuple[Path, Path]):
+    """Item 10: Verify all locally prepared inspection/log lines are valid JSON independently."""
+    insp_path, logs_path = serialization_jsonl_paths
 
     assert insp_path.exists(), "inspections.jsonl must exist"
     assert logs_path.exists(), "inspection_logs.jsonl must exist"
@@ -278,6 +310,7 @@ def test_10_all_jsonl_lines_valid_json():
         insp_lines = [l.strip() for l in f if l.strip()]
 
     assert len(insp_lines) > 0
+    assert len(insp_lines) == 2
     for line in insp_lines:
         obj = json.loads(line)
         assert "inspection_id" in obj
@@ -289,6 +322,7 @@ def test_10_all_jsonl_lines_valid_json():
         log_lines = [l.strip() for l in f if l.strip()]
 
     assert len(log_lines) > 0
+    assert len(log_lines) == 2
     for line in log_lines:
         obj = json.loads(line)
         assert "inspection_id" in obj

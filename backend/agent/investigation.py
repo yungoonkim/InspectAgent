@@ -58,13 +58,12 @@ def _warning_evidence_ready(state, required_event_codes, *, final_report=False):
         return False
     if len(required_event_codes) != len(set(required_event_codes)) or not set(required_event_codes) <= set(EVENT_STAGES):
         return False
-    allowed_tools = {"get_inspection_result", "analyze_image_quality", "get_execution_logs"}
-    if final_report:
-        allowed_tools.add("get_inspection_history")
+    allowed_tools = {"get_inspection_result", "analyze_image_quality", "get_execution_logs", "get_inspection_history"}
     if not state.trace:
         return False
     for entry in state.trace:
-        optional_unavailable = (final_report and entry.tool_name in {"get_execution_logs", "get_inspection_history"}
+        optional_unavailable = ((entry.tool_name == "get_inspection_history"
+            or final_report and entry.tool_name == "get_execution_logs")
             and entry.executed and not entry.success and entry.error_code == "DATA_UNAVAILABLE")
         if (not entry.executed or entry.tool_name not in allowed_tools
             or not optional_unavailable and (not entry.success or entry.error_code is not None)):

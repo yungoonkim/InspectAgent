@@ -43,6 +43,7 @@ def warning_storage(**changes):
     record = record.model_copy(update=changes)
     storage = Mock(spec=InspectionStorageBase)
     storage.get_inspection.return_value = record
+    storage.list_inspections.return_value = []
     storage.get_logs.return_value = [
         make_log(event_code="ANALYSIS_COMPLETED", stage="analyze", level="WARN", metrics=metrics),
         make_log(event_code="INSPECTION_COMPLETED", stage="complete", level="WARN", metrics={
@@ -219,11 +220,20 @@ def test_current_and_proposed_paths_keep_evidence_but_remove_one_readiness_round
     assert current_generator.await_count == (5 if required_logs else 4)
     assert proposed_generator.await_count == (4 if required_logs else 3)
     assert current_result.inspection_snapshot == proposed_result.inspection_snapshot
-    assert current_result.observed_facts == proposed_result.observed_facts
+    assert [(fact.source_tool, fact.source_field, fact.source_event, fact.observed_value)
+        for fact in current_result.observed_facts] == [
+        (fact.source_tool, fact.source_field, fact.source_event, fact.observed_value)
+        for fact in proposed_result.observed_facts]
+    for result in (current_result, proposed_result):
+        assert {fact.evidence_id for fact in result.observed_facts} <= {
+            trace.evidence_id for trace in result.tool_execution_trace if trace.success}
     assert proposed_result.inspection_snapshot["result"] == "OK"
     assert proposed_result.inspection_snapshot["final_result"] == "REINSPECT"
     assert proposed_result.tools_used == ["get_inspection_result", "analyze_image_quality", *(["get_execution_logs"] if required_logs else [])]
-    assert all(trace.executed and trace.success for trace in proposed_result.tool_execution_trace)
+    history = next(trace for trace in proposed_result.tool_execution_trace if trace.tool_name == "get_inspection_history")
+    assert history.origin == "BACKEND_POLICY" and history.executed and not history.success
+    assert history.error_code == "DATA_UNAVAILABLE" and history.evidence_id is None
+    assert all(trace.executed and trace.success for trace in proposed_result.tool_execution_trace if trace is not history)
     assert LIMITATION_TEXT["MISSING_BRIGHTNESS_THRESHOLDS"] in proposed_result.limitations
     assert storage.get_inspection.return_value.model_dump() == original_record
     storage.save_inspection.assert_not_called()

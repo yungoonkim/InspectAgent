@@ -1,0 +1,21 @@
+services:
+  roi-db:
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    container_name: visioninsight-roi-postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      POSTGRES_USER: visioninsight_bootstrap
+      POSTGRES_PASSWORD: ${VI_PG_BOOTSTRAP_PASSWORD:?Generate .env.roi-db.local first}
+      POSTGRES_DB: postgres
+    volumes:
+      - roi-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U visioninsight_bootstrap -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+volumes:
+  roi-pgdata:
+    name: visioninsight-roi-pgdata

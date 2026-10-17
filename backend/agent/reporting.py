@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
 from backend.agent.schemas import CauseCode, CauseSelection, CheckCode, CheckSelection, DiagnosisDraft, ObservedFact
 from backend.agent.errors import AgentFailure
-from backend.agent.tools import ENUM_FIELDS, NUMBER_FIELDS, SIZE_FIELDS, _number, _timestamp
+from backend.agent.tools import ENUM_FIELDS, NUMBER_FIELDS, SIZE_FIELDS, _brightness_comparison, _number, _timestamp
 
 CORE_FIELDS = ("status", "result", "image_quality_status", "defect_detection_status", "final_result", "final_reason_code")
 
@@ -82,6 +82,25 @@ def _leaves(record, prefix):
             yield f"{prefix}/{name}", value
 
 
+def _verified_comparison(state, identifier, document):
+    comparison = document["brightness_comparison"]
+    if (not isinstance(comparison, dict) or not isinstance(comparison.get("samples"), list)
+        or any(not isinstance(record, dict) or not isinstance(record.get("metrics"), dict)
+               for record in comparison["samples"])):
+        raise AgentFailure("EVIDENCE_MISMATCH")
+    trace = next(entry for entry in state.trace if entry.evidence_id == identifier)
+    limit = comparison["limit"]
+    count = document["metadata"]["candidate_count"]
+    if (trace.comparison_inspection_id != state.inspection_id
+        or type(limit) is not int or not 1 <= limit <= 20 or limit != trace.arguments.get("limit", 5)
+        or type(count) is not int or not 0 <= count <= 1000 or len(comparison["samples"]) > min(limit, count)):
+        raise AgentFailure("EVIDENCE_MISMATCH")
+    expected = _brightness_comparison(state.snapshot, comparison["samples"], limit, count)
+    if json.dumps(comparison, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):
+        raise AgentFailure("EVIDENCE_MISMATCH")
+    return comparison["summary"]
+
+
 def _build_catalog(state, max_entries, max_bytes):
     if state.snapshot is None:
         raise AgentFailure("INSUFFICIENT_EVIDENCE")
@@ -92,8 +111,12 @@ def _build_catalog(state, max_entries, max_bytes):
                 raise AgentFailure("EVIDENCE_MISMATCH")
             successful[trace.evidence_id] = trace.tool_name
     entries = []
+    comparisons = []
     for identifier, (tool, document) in state.evidence.items():
         if successful.get(identifier) != tool or document.get("ok") is not True or document.get("metadata", {}).get("evidence_id") != identifier:
+            raise AgentFailure("EVIDENCE_MISMATCH")
+        trace = next(entry for entry in state.trace if entry.evidence_id == identifier)
+        if trace.comparison_inspection_id is not None and "brightness_comparison" not in document:
             raise AgentFailure("EVIDENCE_MISMATCH")
         data = document["data"]
         records = list(enumerate(data)) if isinstance(data, list) else [(None, data)]
@@ -113,6 +136,16 @@ def _build_catalog(state, max_entries, max_bytes):
                 entries.append(CatalogEntry(f"K{len(entries) + 1:04d}", identifier, tool, pointer, value, event))
                 if len(entries) > max_entries:
                     raise AgentFailure("CONTEXT_TOO_LARGE")
+        if "brightness_comparison" in document:
+            if tool != "get_inspection_history":
+                raise AgentFailure("EVIDENCE_MISMATCH")
+            comparisons.append((identifier, tool, _verified_comparison(state, identifier, document)))
+    for identifier, tool, summary in comparisons:
+        for name, value in summary.items():
+            pointer = f"/brightness_comparison/summary/{name}"
+            entries.append(CatalogEntry(f"K{len(entries) + 1:04d}", identifier, tool, pointer, value, None))
+            if len(entries) > max_entries:
+                raise AgentFailure("CONTEXT_TOO_LARGE")
     catalog = EvidenceCatalog(state.inspection_id, tuple(entries))
     if len(catalog_json(catalog).encode("utf-8")) > max_bytes:
         raise AgentFailure("CONTEXT_TOO_LARGE")

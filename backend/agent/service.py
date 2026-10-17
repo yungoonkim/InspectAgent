@@ -140,7 +140,7 @@ def _report_contents(state, catalog=None, required_warning_event_codes=()):
         "catalog": json.loads(catalog_json(catalog or build_catalog(state)))["entries"],
         "tool_execution_trace": [
             {name: getattr(entry, name) for name in
-             ("sequence", "tool_name", "executed", "success", "error_code", "evidence_id")}
+             ("sequence", "tool_name", "executed", "success", "error_code", "evidence_id", "origin", "comparison_inspection_id")}
             for entry in state.trace
         ],
     }
@@ -343,6 +343,14 @@ class AgentService:
             state, required_event_codes=self.required_warning_event_codes,
         ) or (not self.required_warning_event_codes and image_load_failure_evidence_ready(state))
 
+    async def _ensure_warning_history(self, state, round_number):
+        if (warning_report_scope(state) and state.product_id is not None
+            and any(entry.tool_name == "analyze_image_quality" and entry.success for entry in state.trace)
+            and not any(entry.tool_name == "get_inspection_history" for entry in state.trace)):
+            await self._execute(types.FunctionCall(name="get_inspection_history", args={
+                "product_id": PRODUCT_ALIAS, "limit": 5, "inspection_id": state.inspection_id,
+            }), state, round_number, origin="BACKEND_POLICY")
+
     async def _run(self, client, model, state):
         event_requirement = (" Required warning events: " + ", ".join(self.required_warning_event_codes)
             + ". Read execution logs before completing this warning report; include actual stage and timestamp facts."
@@ -367,8 +375,11 @@ class AgentService:
                     name=call.name, id=call.id, response=result,
                 )))
             contents.append(types.Content(role="user", parts=responses))
+            if warning_evidence_ready(state, required_event_codes=self.required_warning_event_codes):
+                await self._ensure_warning_history(state, round_number)
             if self._investigation_ready(state):
                 break
+        await self._ensure_warning_history(state, state.trace[-1].round_number if state.trace else 1)
         if error_report_scope(state):
             error_required_facts(state)
         catalog = build_catalog(state, max_bytes=min(65536, self.limits.max_payload_bytes))
@@ -380,12 +391,13 @@ class AgentService:
         draft = convert_simple_report(text, state, catalog)
         return self._verify_report(draft, state, model)
 
-    async def _execute(self, call, state, round_number):
+    async def _execute(self, call, state, round_number, *, origin="GEMINI"):
         started_at = time.perf_counter()
         trace = ToolExecutionTrace(
             sequence=len(state.trace) + 1, round_number=round_number,
             tool_name=call.name if call.name in ARGUMENT_MODELS else None,
             arguments={}, executed=False, success=False, error_code=None, elapsed_ms=0,
+            origin=origin,
         )
         state.trace.append(trace)
         try:
@@ -395,11 +407,18 @@ class AgentService:
                 arguments = ARGUMENT_MODELS[call.name].model_validate(call.args if isinstance(call.args, dict) else {})
             except ValidationError:
                 raise AgentFailure("TOOL_ARGUMENT_INVALID") from None
-            verified = arguments.model_dump()
+            verified = arguments.model_dump(exclude_none=True)
             if call.name == "get_inspection_history":
                 if state.product_id is None or arguments.product_id != PRODUCT_ALIAS:
                     raise AgentFailure("PRODUCT_SCOPE_MISMATCH")
+                if arguments.inspection_id is not None and arguments.inspection_id != state.inspection_id:
+                    raise AgentFailure("INSPECTION_SCOPE_MISMATCH")
                 python_arguments = {**verified, "product_id": state.product_id}
+                if warning_report_scope(state):
+                    if any(entry.tool_name == call.name and entry.executed for entry in state.trace[:-1]):
+                        raise AgentFailure("TOOL_REPEAT_LIMIT")
+                    python_arguments["inspection_id"] = state.inspection_id
+                trace.comparison_inspection_id = python_arguments.get("inspection_id")
             else:
                 if arguments.inspection_id != state.inspection_id:
                     raise AgentFailure("INSPECTION_SCOPE_MISMATCH")
@@ -472,6 +491,8 @@ class AgentService:
             trace.elapsed_ms = round((time.perf_counter() - started_at) * 1000, 3)
 
     def _verify_report(self, draft, state, model):
+        if any("brightness_comparison" in document for tool, document in state.evidence.values()):
+            build_catalog(state)
         if draft.inspection_id != state.inspection_id:
             raise AgentFailure("EVIDENCE_MISMATCH")
         facts = {}
@@ -524,6 +545,9 @@ class AgentService:
             limitations.add("RECORDS_INCOMPLETE")
         if any(entry.tool_name == "get_inspection_history" and entry.success for entry in state.trace):
             limitations.add("HISTORY_BOUNDED")
+        limitation_texts = [LIMITATION_TEXT[code] for code in sorted(limitations)]
+        if any("brightness_comparison" in document for tool, document in state.evidence.values()):
+            limitation_texts.append("과거 밝기 비교는 저장된 수치의 참고용 기술통계입니다. 측정 알고리즘·ROI 일치와 독립 촬영 여부는 확인되지 않았으며 추세나 물리적 설비 상태를 증명하지 않습니다.")
         return DiagnosisResult(
             inspection_id=state.inspection_id, analysis_status="COMPLETED", model_name=model,
             overall_summary=SUMMARY_TEXT[expected_summary],
@@ -531,7 +555,7 @@ class AgentService:
             observed_facts=draft.observed_facts,
             possible_causes=[Hypothesis(**selection.model_dump(), statement=CAUSE_TEXT[selection.cause_code]) for selection in draft.possible_causes],
             recommended_checks=[RecommendedCheck(**selection.model_dump(), instruction=CHECK_TEXT[selection.check_code]) for selection in draft.recommended_checks],
-            limitations=[LIMITATION_TEXT[code] for code in sorted(limitations)],
+            limitations=limitation_texts,
             tools_used=self._tools_used(state), tool_execution_trace=state.trace, token_usage=state.usage,
         )
 

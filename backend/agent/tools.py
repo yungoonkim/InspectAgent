@@ -1,6 +1,7 @@
 """Allowlisted, read-only inspection queries without image or model execution."""
 
 from datetime import datetime, timezone
+from collections import Counter
 import math
 import re
 from typing import Any, Dict, Optional
@@ -115,6 +116,50 @@ def _response(data: Any = None, error: Optional[str] = None, **metadata: Any) ->
     return {"ok": error is None, "error": error, "data": data, "metadata": metadata}
 
 
+def _brightness_comparison(current, candidates, limit, candidate_count):
+    metrics = current["metrics"]
+    current_mean = metrics.get("mean")
+    current_time = _timestamp(current.get("timestamp"))
+    dimensions = tuple(metrics.get(name) for name in ("width", "height", "channels"))
+    available = (current_time is not None and current.get("status") == "COMPLETED"
+        and _number(current_mean) is not None and current_mean <= 255
+        and all(type(value) is int and 0 < value <= 100000 for value in dimensions))
+    counts = Counter(record.get("inspection_id") for record in candidates)
+    samples = []
+    if available:
+        for record in candidates:
+            identifier = record.get("inspection_id")
+            timestamp = _timestamp(record.get("timestamp"))
+            past_metrics = record.get("metrics", {})
+            mean = past_metrics.get("mean")
+            if (not _valid_id(identifier, INSPECTION_ID_PATTERN) or counts[identifier] != 1
+                or identifier == current["inspection_id"] or record.get("product_id") != current["product_id"]
+                or timestamp is None or timestamp >= current_time or record.get("status") != "COMPLETED"
+                or record.get("final_result") == "ERROR" or record.get("image_quality_status") not in {
+                    "NORMAL", "WARNING_LOW_BRIGHTNESS", "WARNING_HIGH_BRIGHTNESS"}
+                or _number(mean) is None or mean > 255
+                or tuple(past_metrics.get(name) for name in ("width", "height", "channels")) != dimensions):
+                continue
+            samples.append(record)
+        samples.sort(key=lambda record: (_timestamp(record["timestamp"]), record["inspection_id"]), reverse=True)
+        samples = samples[:limit]
+    values = [record["metrics"]["mean"] for record in samples]
+    historical_mean = math.fsum(values) / len(values) if values else None
+    status = ("CURRENT_UNAVAILABLE" if not available else "NO_HISTORY" if candidate_count == 0
+        else "NO_COMPARABLE_HISTORY" if not values else "SINGLE_OBSERVATION" if len(values) == 1
+        else "DESCRIPTIVE_SUMMARY")
+    return {
+        "current": current, "samples": samples, "limit": limit,
+        "summary": {
+            "scope": "STORED_VALUES_ONLY_UNVERIFIED_MEASUREMENT_CONTRACT",
+            "status": status, "current_mean": current_mean, "sample_count": len(values),
+            "historical_mean": historical_mean, "historical_min": min(values) if values else None,
+            "historical_max": max(values) if values else None,
+            "absolute_mean_difference": abs(current_mean - historical_mean) if values else None,
+        },
+    }
+
+
 class InspectionTools:
     """Four business-ID queries backed exclusively by an injected storage interface."""
 
@@ -194,10 +239,17 @@ class InspectionTools:
                 data["threshold_status"] = "RECORDED"
         return _response(data, measurement_source="STORED_RECORD", physical_cause_confirmed=False)
 
-    def get_inspection_history(self, product_id: str, limit: int = 5) -> Dict[str, Any]:
+    def get_inspection_history(self, product_id: str, limit: int = 5, inspection_id: Optional[str] = None) -> Dict[str, Any]:
         """Return latest valid timestamps within a bounded storage-order candidate set."""
         if not _valid_id(product_id, PRODUCT_ID_PATTERN) or type(limit) is not int or not 1 <= limit <= MAX_HISTORY_LIMIT:
             return _response(error="INVALID_ARGUMENT")
+        current = None
+        if inspection_id is not None:
+            current, error = self._lookup(inspection_id)
+            if error:
+                return _response(error=error)
+            if current.product_id != product_id:
+                return _response(error="INVALID_ARGUMENT")
         try:
             records = self._storage.list_inspections(limit=HISTORY_SCAN_LIMIT, product_id=product_id)
         except Exception:
@@ -206,10 +258,15 @@ class InspectionTools:
         valid = [record for record in candidates if record["timestamp"] is not None]
         invalid = [record for record in candidates if record["timestamp"] is None]
         valid.sort(key=lambda record: _timestamp(record["timestamp"]), reverse=True)
-        return _response(
+        response = _response(
             (valid + invalid)[:limit], error=None if candidates else "DATA_UNAVAILABLE",
             ordering="TIMESTAMP_DESC_INVALID_LAST_STABLE", scan_limit=HISTORY_SCAN_LIMIT,
             candidate_count=len(candidates), scan_limit_reached=len(records) >= HISTORY_SCAN_LIMIT,
             ordering_scope="RETURNED_STORAGE_CANDIDATES", global_latest_guaranteed=False,
             invalid_timestamp_count=len(invalid),
         )
+        if current is not None:
+            response["brightness_comparison"] = _brightness_comparison(
+                _record_data(current), candidates, limit, len(candidates),
+            )
+        return response

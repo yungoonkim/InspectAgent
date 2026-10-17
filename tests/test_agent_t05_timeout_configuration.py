@@ -183,9 +183,11 @@ def test_cli_does_not_accept_preparation_override_in_execution_mode(manual_runne
     main.assert_not_called()
 
 
-def test_selected_manifest_drives_real_sdk_mock_transport_timeouts(tmp_path):
-    prepare_attempt(tmp_path, "t05_final30", "INSP-000001", scenario="T05", final_timeout=30)
-    manifest = validate_attempt_timeout(tmp_path, "t05_final30", "INSP-000001", configured_timeout=30, process_timeout="30")
+@pytest.mark.parametrize("scenario,attempt,target", [("T05", "t05_final30", "INSP-000001"),
+    ("T06", "t06_operational_groundtruth_isolated_final30_1", "INSP-001406")])
+def test_selected_manifest_drives_real_sdk_mock_transport_timeouts(tmp_path, scenario, attempt, target):
+    prepare_attempt(tmp_path, attempt, target, scenario=scenario, final_timeout=30)
+    manifest = validate_attempt_timeout(tmp_path, attempt, target, scenario=scenario, configured_timeout=30, process_timeout="30")
     transmissions, requests = [], []
     original_send = httpx.AsyncClient.send
     original_generate = models.AsyncModels.generate_content
@@ -213,7 +215,7 @@ def test_selected_manifest_drives_real_sdk_mock_transport_timeouts(tmp_path):
     service = AgentService(InspectionTools(Mock(spec=InspectionStorageBase)),
         settings=SimpleNamespace(GEMINI_MODEL="gemini-3.8-flash"), client=client,
         limits=AgentLimits(final_model_timeout_seconds=manifest["timeouts_seconds"]["final_ceiling"]))
-    state = RequestState("INSP-000001", deadline=time.monotonic() + 60)
+    state = RequestState(target, deadline=time.monotonic() + 60)
     contents = [types.Content(role="user", parts=[types.Part.from_text(text="Offline synthetic input")])]
 
     async def run():

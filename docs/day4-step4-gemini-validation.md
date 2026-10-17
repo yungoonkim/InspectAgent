@@ -5024,3 +5024,1619 @@ backend 운영 코드, 운영 JSONL, 모델/메타데이터, 기존 READY/잠금
 다음에는 별도 승인 후 안전한 새 회차 준비와 T05 실제 단일 E2E가 필요하다.
 최종 JSON 30초의 실제 T05 성공 여부와 이전 Google 504 내부 원인은 여전히 미확인이다.
 계측 정합화까지만 완료하고 중단한다.
+
+## T01/T03/T05/T06 공통 상태 전이 — 읽기 전용 오프라인 점검
+
+### A. 기준과 종합 판정
+
+**종합: PARTIAL.** 네 표준 경로와 최종 안전 검증은 PASS지만,
+모든 근거 충족 조합에서 추가 조사 요청이 사라진다는 일반적 보장은 없다.
+이는 아래 예외 경로의 요청 효율 문제이며, 완료 판정이나 근거 검증이 우회됐다는 뜻은 아니다.
+운영 수정은 하지 않았고 기존 테스트로 검증 범위가 충족돼 신규/수정 테스트도 0개다.
+
+시작 시 Git 기준은 `6ae8a51`이며 작업 트리는 기존 `.tmp_measurement_regressions/` 외 깨끗했다.
+최신 코드 위치를 다시 확인했다. 아래 표는 운영 정책과 합성 fixture 기준으로,
+실제 검사/이미지 재실행 또는 T06 평가 정답 조회 결과가 아니다.
+기존 T01/T03 실제 PASS, 개선 전 T05 실제 FAIL, T06 실제 NOT TESTED 기록은 변경하지 않는다.
+
+### B. 시나리오 매트릭스
+
+| 시나리오 | 서버 기록 판정 | 필수 도구 / 원천 근거 | 서버 조기 종료 | 최종 JSON 진입 및 Mock 요청 수 | 주요 위험 |
+|---|---|---|---|---|---|
+| T01 / INSP-001396 | COMPLETED, OK / OK / ALL_CHECKS_PASSED | get_inspection_result. 핵심 상태 6개, 정상 빠른 종료에는 유한 anomaly_score/decision_threshold 일관성 필요 | NORMAL: 상태가 COMPLETED/OK/NORMAL/COMPLETED/OK/ALL_CHECKS_PASSED이며 score<=threshold | 공통 진입 규칙, 표준 순차 Mock 2요청 | OK를 무결점 보증으로 확대하면 안 됨 |
+| T03 / INSP-001398 | COMPLETED, OK / REINSPECT / IMAGE_QUALITY_WARNING | 결과+analyze_image_quality. 실제 품질 측정값/크기/상태 일치. 서버 필수 이벤트 계약이 있으면 로그도 필수 | WARNING: 경고 scope, 점수·품질·Trace/Evidence 일치, 지정 필수 이벤트 충족 | 표준 3요청, 필수 로그 있는 fixture 4요청 | 모델 OK와 재검사 판정 구별, 기준값/장비 원인 생성 금지 |
+| T05 / INSP-001405 | FAILED, UNKNOWN / ERROR / INSPECTION_FAILED | 결과+get_execution_logs. 실제 IMAGE_LOAD_FAILED와 INSPECTION_FAILED, 기존 validator의 17개 근거 | IMAGE_LOAD_FAILURE: 실제 이벤트·소유권·null·Trace 검증, 추가 필수 계약/도구 없음 | 루프 뒤 ERROR gate 재검증 후 최종; 표준 순차 Mock 3요청 | 미측정 0 대체, SKIPPED에서 모델 고장 추론 금지 |
+| T06 / INSP-001406 | 서버가 기록한 COMPLETED, OK / OK / ALL_CHECKS_PASSED | T01과 같은 결과 조회와 정상 상태/점수 근거. 외부 정답은 입력 아님 | NORMAL: T01과 같은 조건, T06 전용 정답 분기 없음 | 표준 저장 OK fixture 2요청 | 외부 평가 결과를 Agent가 아는 것처럼 설명하면 안 됨 |
+
+요청 수는 별도 도구 선택 응답을 사용하는 기존 fixture 기준이다.
+실제 모델의 병렬 도구 선택/추가 조사/실패에 따라 달라지며 실서버 횟수나 성공을 보장하지 않는다.
+로그·품질·이력 조회를 모든 검사에 의무적으로 추가하지 않는다.
+
+필수 사실의 범위도 구분한다.
+
+- 공통 최종 관측 사실은 핵심 상태 6개다. 정상 조기 종료에 필요한 score/threshold가
+  모든 정상 보고서의 필수 observed_facts로 강제되는 것은 아니다.
+- T03 최종 보고서는 핵심 6개와 품질 상태/mean/std/min/max/threshold_status의 6개를 요구한다.
+  기록된 밝기 기준이 있으면 해당 기준도, 필수 이벤트 계약이 있으면 같은 로그 행의 stage/timestamp 근거도 요구한다.
+  미기록 기준은 NOT_RECORDED/null로 유지한다.
+- T05의 17개는 핵심 상태 6개+미산출 5개+두 ERROR 행의 event_code/stage/timestamp 6개다.
+  일반 ERROR 전체에 IMAGE_LOAD_FAILED나 고정 17개를 강요하는 계약은 아니다.
+
+근거: `service.py:125`, `service.py:339`, `investigation.py:24`, `investigation.py:42`,
+`investigation.py:154`, `error_policy.py:18`, `error_policy.py:100`.
+대표 회귀: `test_agent_operating_timeouts.py:53`, `test_agent_efficiency.py:40`,
+`test_agent_warning_policy_integration.py:36`, `test_agent_image_load_stop.py:122`.
+
+### C. 공통 상태 전이와 최종 JSON의 실제 진입 조건
+
+`service.py`의 조사 루프는 다음 순서다.
+
+1. 조사 Gemini 응답을 받고 도구명·인자·고정 검사 ID·호출/반복/라운드 한도를 검증한다.
+2. 동일 응답의 허용 도구 배치를 모두 실행하고 성공 결과만 서버 Evidence Store에 넣는다.
+3. 함수 이름/호출 ID를 보존한 FunctionResponse를 user Content로 구성한다.
+4. NORMAL → WARNING → 추가 계약이 없는 IMAGE_LOAD_FAILURE 순으로 충분성을 검사한다.
+   어느 것도 충족하지 않으면 기존 예산 내에서 모델 조사를 계속한다.
+5. **다른 종료 경로도 있다:** 모델이 도구 없는 응답을 반환하고 snapshot이 있으면 루프를 끝낸다.
+   따라서 JSON 진입은 서버 ready=True만으로 제한된 것이 아니다.
+6. ERROR scope이면 기존 `error_required_facts` gate를 거친다.
+   이후 실제 Evidence 카탈로그를 만들고 독립 최종 JSON 요청으로 전환한다.
+7. 단순 JSON/토큰 변환 → DiagnosisDraft/Pydantic → 실제 값/Fact ID/Evidence/Pointer/원인·권고 검증 →
+   오류·경고별 최종 커버리지 → FastAPI의 원본 snapshot/최종 판정 재검증을 거친다.
+
+T05는 근거 부족 상태에서 모델이 종료해도 ERROR gate가 최종 JSON 전에 차단한다.
+T03은 모델이 일찍 종료하면 필요한 경고 근거가 부족한 채 최종 JSON 요청까지 갈 수 있으나,
+최종 `warning_report_covered`가 완료를 거부한다. JSON 요청 수락과 analysis_status=COMPLETED는 다르다.
+근거 누락을 보충하거나 원본 판정을 바꿔 성공시키지 않는다.
+
+### D. 위험 A–H 판정과 실제 근거
+
+아래 판정은 **코드/기존 Mock에서의 통제**를 뜻한다. Gemini 서버의 실제 지연/성공률 판정이 아니다.
+
+| 위험 | 판정 | 확인 결과 / 근거 |
+|---|---|---|
+| A 충분한 근거 후에도 조사 계속 | **FAIL — 전역적인 추가 요청 차단 보장 없음** | 네 표준 빠른 경로는 PASS. 그러나 유효한 이력까지 조회한 T03은 빠른 경로에서 제외되어 모델 종료 응답을 한 번 더 받는다. `test_agent_warning_policy_integration.py:87`은 이미 충분한 품질+이력 뒤 조사 종료+최종으로 총 4요청 COMPLETED를 검증한다. 일반/추론 ERROR도 새 빠른 종료 대상이 아니어서 모델 종료를 기다린다(`test_agent_image_load_stop.py:227`). |
+| B 부족한 근거로 잘못 완료 | PASS | 준비되지 않은 경고/ERROR predicate는 False, 필수 도구 오류는 안전 실패. 모델 종료 경로로 JSON에 진입해도 최종 커버리지가 완료를 거부한다. `test_agent_warning_policy_integration.py:71`, `test_agent_image_load_stop.py:200`, `test_agent_image_load_stop.py:218`. |
+| C 마지막 FunctionResponse/이력 손상 | PASS(오프라인) | 마지막 응답을 로컬에 정상 구성하고 전체 이력/ID/서명을 보존한다. 독립 최종 요청에는 이력을 넣지 않으며 별도 ACK 성공을 주장하지 않는다. `test_agent_image_load_stop.py:122`, `test_agent_service.py:626`, `test_agent_service.py:651`. |
+| D 필수 카탈로그 사실 누락 | PASS | 실제 Evidence만 카탈로그화하고 필수 17개를 필드/값별 대조한다. 토큰/필수 사실 누락은 변환·검증에서 거부한다. `reporting.py:85`, `reporting.py:159`, `test_agent_image_load_stop.py:122`, `test_agent_image_load_stop.py:200`. |
+| E 다른 ERROR에 T05 정책 오적용 | PASS | 실제 IMAGE_LOAD_FAILED+INSPECTION_FAILED 및 원천 계약이 필요하다. 일반 ERROR, INFERENCE_FAILED, 추가 계약/도구는 자동 종료하지 않는다. `error_policy.py:100`, `test_agent_image_load_stop.py:51`, `test_agent_image_load_stop.py:227`. |
+| F T06 Ground Truth 누출 | PASS(운영 경계/합성 공격 입력) | 도구 allowlist 필드만 반환, 원본 메시지/정답성 metrics 차단, image_id 제거 및 product_id 별칭, 자유 진단 문구/추가 필드 거부. `test_agent_tools.py:220`, `service.py:98`, `test_agent_service.py:618`. 실제 평가 파일은 조회하지 않았으며 외부 평가 파이프라인 전체를 감사한 결과는 아님. |
+| G 서버 최종 판정 변경 | PASS | 모델은 토큰/허용 코드만 선택하며 판정은 서버 snapshot 소유다. FastAPI도 저장 기록과 대조한다. `service.py:474`, `api.py:185`, `test_agent_api.py:215`. |
+| H 전체 timeout/재시도 변화 | PASS | 조사 15초, 최종 기본 15초/명시 선택 최대 30초, 전체 60초, 여유 2초, SDK attempts=1 유지. 실제 헤더/transport/로컬 제한과 예산·상한 회귀는 `test_agent_operating_timeouts.py:53` 및 같은 모듈의 deadline/MockTransport 테스트로 확인. |
+
+A의 FAIL은 이번 수정으로 발생한 회귀나 근거 검증 취약점을 뜻하지 않는다.
+**보수적인 빠른 경로와 모델 종료 경로가 공존하여 모든 합법적 도구 조합의 추가 요청까지 제거하지는 않는다**는 뜻이다.
+T03 필수 로그가 없는 경우 최종 JSON 후 거부되는 경계 역시 추가 유료 생성 비용이 발생할 수 있는 설계 한계다.
+실제 비용/추가 지연은 이번에 측정하지 않았다.
+
+### E. FunctionResponse, T06 및 보호 계약
+
+조기 종료 시 마지막 도구 결과는 서버 Store와 최종 카탈로그에 유지된다.
+원래 호출 ID로 FunctionResponse를 구성하지만 그 응답만 ACK받는 추가 조사 요청은 생략한다.
+최종 JSON은 tools/tool_config/Function Calling 이력 없는 독립 user Content라서
+미해결 호출 이력을 최종 요청에 잘못 넣는 구조가 아니다. 실서버 수락 여부와는 별개다.
+
+T06의 외부 평가상 미탐은 운영 Agent의 입력/종료 조건이 아니다.
+저장 OK인 합성 T06은 T01과 같은 정책으로 처리됐고, 실제 T06 이미지·평가 매핑을 새로 조회하지 않았다.
+UNKNOWN/SKIPPED만으로 이미지 로딩 실패나 모델 고장을 추정하지 않는다.
+`_verify_report`가 MODEL_NOT_GUARANTEE 등 한계를 서버에서 추가하므로 정상 보고서도 무결점을 보증하지 않는다.
+
+### F. 기존 테스트 실행 결과
+
+기존 테스트가 요청된 양성·음성·교차 경계를 이미 검증하므로 신규/수정 Mock 테스트는 **0개**다.
+첫 범위는 운영 timeout, 정상 효율화, 이미지 로딩 종료, 경고 통합, 계측, ERROR 정책,
+도구 sanitizer, 보고서 통합의 8개 모듈이었다. 이어 모든 Agent 테스트와 전체 테스트를 실행했다.
+
+| 실행 범위 | 실제 결과 |
+|---|---|
+| 직접 관련 8개 모듈 | **315 PASS**, 9.85초 |
+| Agent 전체 `tests/test_agent*.py` | **879 PASS**, 12.74초 |
+| 전체 `pytest tests -q -p no:cacheprovider` — 1회만 실행 | **984 PASS / 경고 3건**, 28.61초 |
+| `python -m pip check` | No broken requirements found |
+| `git diff --check` | 공백 오류 없음 |
+
+실제 HTTP transport, 프로젝트 내 Python/OpenCV 쓰기와 ground_truth 디렉터리 읽기를 차단했다.
+테스트 출력·JSONL·주입 이미지 fixture는 검증된 외부 임시 경로로 격리했다.
+기존 경고 3건은 timm/anomalib 안내 2건 및 가드 실행기의 anyio assert-rewrite 안내 1건이다.
+Mock 성공을 실제 E2E PASS로 바꾸지 않았으며 이번 실제 Gemini API 요청은 **0회**다.
+
+비교한 기존 보호 파일 **165개 SHA256이 모두 동일**했다.
+backend/scripts/tests, 운영 JSONL, 모델/메타데이터, 기존 수동 회차 READY/잠금/결과,
+발표 자료를 포함한다. 운영 코드·fixture·테스트는 수정하지 않았고 검증 문서에만 이 섹션을 추가했다.
+신규 실서버 회차·실제 분석·Git add/commit/push는 각각 **0건**이다.
+
+### G. 다음 승인 경계
+
+현재 T05 표준 이미지 로딩 실패 경로에 추가 운영 수정이 필수라는 증거는 발견하지 못했다.
+계측은 IMAGE_LOAD_FAILURE를 구분한다. 다음 T05 실제 검증에는 별도의 새 회차 준비와 단일 유료 호출 승인이 필요하다.
+기존 회차는 재사용하지 않는다. T06 실서버는 계속 NOT TESTED다.
+
+추가 요청 비용을 더 줄이려면 별도 승인 후 `investigation.py`/`service.py`에서
+이미 유효한 선택적 이력이 있는 경고의 충분성 재사용 범위를 검토할 수 있다.
+또한 경고의 모델 종료 경로에서 최종 요청 전 필수 근거를 검증하는 설계가 후보지만,
+현행 최종 validator가 허용하는 선택적 로그 부재/이력과 동일한 계약을 보존해야 한다.
+단순히 기존 엄격한 빠른 종료 predicate를 JSON 전 gate로 재사용하면 허용되던 보고서까지 거부할 수 있다.
+필수 로그 누락 시 JSON SDK 호출 0회, 충분한 이력 시 불필요한 조사 응답 생략,
+기존 허용/거부 보고서 계약 불변을 후속 Mock assertion으로 제안한다. 이번에는 구현하지 않았다.
+
+이전 504의 Google 서버 내부 원인은 UNKNOWN, 개선 후 T05 최종 JSON 30초와 T06 실제 E2E는 NOT TESTED다.
+운영 변경·신규 회차·실서버 호출 없이 공통 점검과 보고까지만 완료하고 중단한다.
+
+## T05 개선 Agent 실서버 재검증 신규 READY 준비 — 실행 없음
+
+**준비 판정: READY. 실제 E2E는 NOT TESTED이며, READY는 PASS가 아니다.**
+
+| 항목 | 이번 준비 결과 |
+|---|---|
+| 신규 회차 | `t05_operational_earlyexit_final30_1` — 기존 파일 충돌 없음 |
+| 대상 | `INSP-001405` / T05 이미지 로딩 실패 |
+| READY 기록 | `data/outputs/manual_validation/t05_operational_earlyexit_final30_1_ready.json` |
+| 준비 전용 점검 기록 | `data/outputs/manual_validation/t05_operational_earlyexit_final30_1_preflight.json` |
+| 모델 / SDK / API | gemini-3.8-flash / google-genai 2.31.0 / Developer API v1beta |
+| 조사 / 최종 기본 / 선택 상한 | 15초 / 15초 / 신규 회차만 30초 |
+| 전체 / 최종 안전 여유 | 60초 / 2초 |
+| 실제 분석 / Gemini HTTP | 각각 **0회** |
+| 신규 실행 잠금 / 실행 결과 | 둘 다 없음 |
+
+기존 `t05_operational_error1`의 최초 15초 READY를 보존했다.
+기존 `t05_operational_final30_1`의 30초 READY·실행 잠금·HTTP 502/FAIL 결과도 보존했다.
+원본 READY의 상태 문자열만 보고 사용 여부를 판단하지 않고 잠금/결과까지 구분했다.
+새 회차는 기존 runner의 `--attempt-id ... --prepare-only --prepare-final-timeout 30` 경로에서
+충돌 검증 및 exclusive create로 정확히 하나 생성했다. 실행 모드는 사용하지 않았다.
+
+준비 자식 프로세스에서만 `AGENT_FINAL_MODEL_TIMEOUT_SECONDS=30`을 설정하고
+신규 회차의 `--offline-only` 검사를 통과했다. `.env`/기본 Settings/전역 환경은 변경하지 않았다.
+SDK 클라이언트 생성, SDK sync/async 요청, 실제 HTTP transport, `AgentService.analyze`를 차단한 채
+실제 저장소 조회와 격리된 정책 probe만 수행했다. 키는 존재 여부만 확인했다.
+
+읽기 전용으로 FAILED / UNKNOWN / ERROR / INSPECTION_FAILED,
+image_quality_status=ERROR, defect_detection_status=SKIPPED를 확인했다.
+anomaly_score/decision_threshold/inference_time_ms 및 밝기 mean/std는 실제 null이었다.
+이벤트 순서는 INSPECTION_STARTED → IMAGE_LOAD_FAILED → INSPECTION_FAILED와 일치했다.
+기존 ERROR validator가 실제 원천 근거 **17개**를 반환했고, 서버 종료 조건 및 계측 모두
+`ready=true / IMAGE_LOAD_FAILURE`를 확인했다. 추가 필수 경고 이벤트 계약은 빈 목록이다.
+이것은 오프라인 읽기 전용 검증이며 실제 분석의 Evidence 수집/최종 검증 PASS가 아니다.
+
+기존 테스트 6개 모듈만 실행했다: 이미지 로딩 실패 종료, ERROR 필수 근거,
+공통 계측, ERROR 계측, T05 회차 timeout 정합성, SDK timeout 계측.
+**208 PASS / 경고 1건**, 6.76초, 외부 HTTP transport 시도 0회였다.
+FunctionResponse 로컬 이력/ID/서명과 독립 카탈로그의 17개 사실 전달,
+합성 최종 JSON/Pydantic/Evidence 검증, 누락/오류/회차 충돌 차단을 확인했다.
+설치 SDK MockTransport에서 SDK/HTTPX/X-Server-Timeout/wait_for의 **15→30→15초** 전파도 통과했다.
+실제 서버 timeout/header 효과와 최종 30초 요청은 아직 NOT TESTED다.
+
+전체 pytest는 반복하지 않았다. 최근 **984 PASS / 경고 3건**은 이전 공통 점검의 결과이며
+이번 준비 작업에서 새로 실행한 결과가 아니다. `git diff --check`는 공백 오류 없이 통과했다.
+운영 코드·계측 코드·기존 테스트 수정은 0개다.
+기존 보호 파일 **165개 SHA256 모두 동일**: 운영 JSONL, 모델/메타데이터, 코드/테스트,
+과거 준비·실행 기록/잠금, 발표 자료를 보존했다. 신규 파일은 이 회차 READY와 preflight 2개뿐이다.
+평가 Ground Truth는 사용하지 않았으며 신규 이미지 검사도 수행하지 않았다.
+
+Git add/commit/push 0건. 새 READY에 실행 잠금이나 sanitized 실행 결과를 만들지 않았다.
+실제 모델의 도구 선택·최종 보고서 17개 커버리지·최종 30초 성공·시간/토큰/비용은 미검증이다.
+이전 Google 504의 내부 원인은 UNKNOWN이다. T03 예외 경로 개선은 이번 작업과 분리했다.
+다음은 **새 회차에 대한 실제 T05 E2E 정확히 1회 별도 승인**이다.
+실행 직전에 키/회차/잠금/판정/프로세스 설정을 다시 확인해야 하며, 이번에는 실행하지 않고 중단한다.
+
+## T05 이미지 로딩 실패 개선 후 실제 E2E 단일 재검증 — PASS
+
+### 회차 및 Preflight
+
+- 실행 회차: `t05_operational_earlyexit_final30_1`, 대상: `INSP-001405`.
+- 계측 시각: 2026-10-16T13:42:09.292920+00:00. 모델 gemini-3.8-flash,
+  SDK google-genai 2.31.0, Developer API v1beta를 유지했다.
+- 실제 실행 전 READY의 회차/검사 ID/30초 상한, 잠금·결과 부재, API 키 존재,
+  ERROR 정책 활성화 및 17개 원천 사실, 기존 도구·시간 한도를 재확인했다.
+  네트워크와 분석 함수를 차단한 `--offline-only` Preflight를 통과했다.
+- 실행은 기존 runner의 `--attempt-id t05_operational_earlyexit_final30_1
+  --approved-single-analysis` 경로로 정확히 한 번 수행했다.
+  `AGENT_FINAL_MODEL_TIMEOUT_SECONDS=30`은 실행 자식 프로세스에만 적용했다.
+  `.env`, 전역 환경, 기본 최종 timeout 15초는 변경하지 않았다.
+- 정식 FastAPI `POST /analyze/INSP-001405`를 IN_PROCESS_ASGI 방식으로 1회 호출했다.
+  실제 Gemini 서버에 연결했으며 별도 외부 FastAPI 서버/TCP 경유 검증은 아니다.
+
+### 실제 HTTP 및 timeout 계측
+
+**최종 결과 PASS: FastAPI HTTP 200, analysis_status=COMPLETED, 오류 코드 없음.**
+
+| 요청 | 실제 단계 | HTTP | SDK timeout | HTTPX / 서버 헤더 / wait_for | HTTP 시간 | 입력 / 출력 / Thinking / 총 토큰 |
+|---|---|---|---|---|---|---|
+| 1 | 조사: get_inspection_result | 200 | 15000ms | 15 / 15 / 15초 | 2.696896초 | 1279 / 28 / 92 / 1399 |
+| 2 | 조사: get_execution_logs | 200 | 15000ms | 15 / 15 / 15초 | 2.385054초 | 1559 / 28 / 184 / 1771 |
+| 3 | **최종 JSON: STRUCTURED_OUTPUT** | 200 | 30000ms | 30 / 30 / 30초 | 11.062972초 | 6820 / 275 / 1161 / 8256 |
+
+HTTPX 값은 실제 request extensions의 connect/read/write/pool 모두 동일했다.
+서버 전달 값은 실제 `X-Server-Timeout`이며 기존 15초 헤더 잔류 충돌은 없었다.
+SDK wrapper 경과 시간은 각각 2.713797 / 2.388144 / 11.065521초로,
+위 HTTP 전송 경과 시간과 구분한다. 요청 시작 시 Agent 잔여 예산은
+59.984 / 57.266 / 54.844초였다. 전체 60초, 안전 여유 2초를 유지했고 상한을 초과하지 않았다.
+서버 내부 절대 deadline 및 transport 절대 deadline은 NOT OBSERVABLE이다.
+로컬 deadline은 공개 wait_for 진입 시각과 제한으로 계산한 값이며 서버 내부 deadline이 아니다.
+
+실제 HTTP 3회 = 조사 2회 + 최종 JSON 1회다. 세 번째는 후속 조사가 아니다.
+각 SDK 요청의 attempts=1은 최초 시도 1회를 뜻하며 재시도 1회가 아니다.
+SDK 자동 재시도 0회, 수동 재시도 0회, 추가 분석 0회였다.
+
+계측 주의: 결과의 사전 점검용 scalar `actual_final_timeout_seconds`는
+`NOT TESTED`가 남아 있으나, 실행 후 요청별 SDK/HTTPX/서버 헤더/wait_for 실측은
+모두 최종 **30초**를 확인했다. 이 필드 불일치는 숨기지 않고 기록하며,
+실행 결과 파일이나 계측 코드를 사후 수정하지 않았다.
+
+### 도구, Trace 및 조사 종료
+
+| 실행 순서 / 라운드 | 실제 Agent Python 도구 | 검사 ID | 결과 | Evidence | 도구 시간 |
+|---|---|---|---|---|---|
+| 1 / 1 | get_inspection_result | INSP-001405 | 성공 | E0001 | 2.831ms |
+| 2 / 2 | get_execution_logs | INSP-001405 | 성공 | E0002 | 23.582ms |
+
+두 도구 모두 실제 Gemini Function Call에 따라 실행됐고 Trace/Evidence 연결을 통과했다.
+두 번째 조사 요청에는 첫 도구 FunctionResponse 1개가 전달됐으며,
+call/response ID·역할 및 part/서명 경계 검증이 통과했다.
+두 번째 도구 직후 종료 판정은 **ready=true / IMAGE_LOAD_FAILURE**였다.
+추가 조사 ACK 요청 없이 독립 최종 JSON 요청으로 전환했다. 최종 요청은
+도구 설정/Function Calling 이력 없이 사실 카탈로그를 전달하는 기존 경로였다.
+E0002의 사실도 최종 보고서 F0012~F0017에 반영돼 검증됐다.
+마지막 FunctionResponse를 별도 조사 요청으로 전송했다는 의미는 아니다.
+
+전체 Python 도구 계측 3건에는 FastAPI의 사전 검사 조회 1건이 포함된다.
+Agent가 실행한 조회 도구는 **2개**이며 중복 Agent 실행으로 집계하지 않는다.
+
+### 원천 근거와 실제 최종 보고서 검증
+
+원천 근거 수집 `required_evidence_collected=true`와 실제 최종 보고서 검증
+`report_validation_passed=true`를 각각 확인했다. 이번에는 두 단계 모두 PASS다.
+최종 Fact ID는 F0001~F0017, 총 17개이며 운영 ERROR 계약 17개를 모두 충족했다.
+
+| 범주 | 실제 Evidence / JSON Pointer | 실제 값 및 최종 사실 |
+|---|---|---|
+| 핵심 상태 6개 | E0001 /data/defect_detection_status, /data/final_reason_code, /data/final_result, /data/image_quality_status, /data/result, /data/status | SKIPPED / INSPECTION_FAILED / ERROR / ERROR / UNKNOWN / FAILED |
+| 미측정 5개 | E0001 /data/anomaly_score, /data/decision_threshold, /data/inference_time_ms, /data/metrics/mean, /data/metrics/std | 모두 null, 0으로 대체하지 않음 |
+| 이미지 로딩 실패 3개 | E0002 /data/1/event_code, /data/1/stage, /data/1/timestamp | IMAGE_LOAD_FAILED / load / 실제 저장 시각 |
+| 검사 실패 3개 | E0002 /data/2/event_code, /data/2/stage, /data/2/timestamp | INSPECTION_FAILED / complete / 실제 저장 시각 |
+
+원본 이벤트 순서는 INSPECTION_STARTED → IMAGE_LOAD_FAILED → INSPECTION_FAILED였다.
+마지막 두 이벤트는 같은 저장 timestamp이므로 시간 차이를 만들어 해석하지 않았다.
+실제 최종 JSON 생성·파싱, 단순 스키마, DiagnosisDraft 변환, Pydantic,
+Evidence ID/Fact ID/JSON Pointer 및 Trace 연결, FastAPI 응답 스키마가 모두 PASS였다.
+
+자연어 안전성은 모델 선택 코드와 서버의 고정 문구를 함께 검토했다.
+가능 원인은 `IMAGE_ACQUISITION` → F0012(IMAGE_LOAD_FAILED)로,
+이미지 등록·획득 과정의 가능성이지 장비 고장 확정이 아니다.
+권고는 `IMAGE_REGISTRATION_ACCESS_CHECK` → F0012,
+`MANUAL_REINSPECTION` → F0005(ERROR)이며 모든 참조가 유효했다.
+MODEL_AVAILABILITY/MODEL_SERVICE_CHECK, 가짜 INFERENCE_FAILED,
+점수 0·미기록 밝기 수치·제품 정상/불량 확정·설비 정지/복구 성공 주장은 없었다.
+물리적 원인 확정 불가 및 미기록 밝기 기준의 한계를 유지했다.
+
+### 비용, 보호 및 남은 범위
+
+- 전체 Agent E2E **16.332551초**, 확인된 입력 **9658**, 출력 **331**,
+  Thinking **1437**, 전체 **11426토큰**. 세 응답 사용량 모두 확보했다.
+- 실제 청구 비용은 과금 기록이 없어 UNKNOWN이며 토큰을 청구 금액으로 환산하지 않았다.
+- status=FAILED, result=UNKNOWN, final_result=ERROR,
+  final_reason_code=INSPECTION_FAILED를 원본/반환 모두 유지했다.
+- 실행 전 보호 파일 **167개 SHA256 모두 동일**: backend/scripts/tests,
+  운영 JSONL 2개, 모델/메타데이터, 기존 회차·READY·잠금·결과 및 발표 자료.
+  신규 파일은 승인 회차의 실행 잠금과 sanitized 결과 2개뿐이다.
+  READY/preflight 원본도 그대로 보존했다. 저장소 write_attempts=0이었다.
+- 실행 산출물: `data/outputs/manual_validation/t05_operational_earlyexit_final30_1_analysis_started.lock`,
+  `data/outputs/manual_validation/t05_operational_earlyexit_final30_1_sanitized_result.json`.
+- 운영 코드/테스트/계측기 수정 없이 문서에만 이번 결과를 추가했다.
+  기존 문서 변경과 `.tmp_measurement_regressions/`를 보존했다.
+  이번에는 전체 pytest를 반복하지 않았다. 이전 984 PASS는 이번 실행 결과가 아니다.
+- 기존 실패 회차는 세 번째 **조사** HTTP 504였으나 이번 회차는 세 번째
+  **최종 JSON** HTTP 200이다. 이전 Google 504 내부 원인은 여전히 UNKNOWN이다.
+  이번 최종 요청은 11.063초에 성공했으므로 30초가 성공의 유일 원인이라는 근거도 없다.
+- 이 PASS는 저장된 T05 이미지 로딩 실패 1건에 한정되며 모든 ERROR 유형의 일반화가 아니다.
+  Ground Truth를 사용하거나 신규 이미지 검사/PatchCore 추론을 실행하지 않았다.
+  실제 분석 1회 후 중단했다. Git add/commit/push 0건이다.
+  T06 및 추가 Gemini 호출, 계측 scalar 정정 등 후속 변경은 별도 승인을 기다린다.
+
+## T06 Ground Truth 격리 및 실제 E2E READY 사전 점검 — BLOCKED
+
+### 판정과 변경 범위
+
+**최종 상태 BLOCKED: 오프라인 안전성 검증은 통과했지만 현재 준비/실행 계약이 T06을 지원하지 않는다.**
+READY를 임의 생성하거나 다른 시나리오로 위장하지 않았다. 실제 T06 E2E는 NOT TESTED다.
+변경은 `tests/test_agent_t06_isolation.py` 신규 Mock 테스트와 이 문서의 추가 기록뿐이다.
+backend/scripts/config/프롬프트/스키마 및 기존 실서버 산출물은 변경하지 않았다.
+
+### 실제 운영 검사 기록
+
+대상은 `INSP-001406`이며 다음은 저장된 운영 기록의 실제 조회값이다.
+
+| 항목 | 값 |
+|---|---|
+| status / defect_detection_status | COMPLETED / COMPLETED |
+| result / final_result / final_reason_code | OK / OK / ALL_CHECKS_PASSED |
+| image_quality_status | NORMAL |
+| anomaly_score / decision_threshold | 32.26792526245117 / 34.1442 |
+| inference_time_ms | 39.55 |
+| 밝기 mean / std / min / max | 138.37 / 92.08 / 30.0 / 255.0 |
+| width / height / channels | 900 / 900 / 3 |
+
+저장 로그의 순서는 INSPECTION_STARTED → IMAGE_LOADED → ANALYSIS_COMPLETED →
+INFERENCE_STARTED → INFERENCE_COMPLETED → INSPECTION_COMPLETED였다. 모두 INFO 이벤트다.
+이미지를 다시 읽거나 PatchCore 추론/신규 검사를 실행하지 않았다.
+이 운영 데이터는 외부 평가상의 실제 정답이나 특정 결함 종류를 증명하지 않는다.
+
+### 평가 데이터 위치 및 네 가지 도구의 격리
+
+파일명/디렉터리 존재만 읽기 전용으로 확인했다. 외부 평가 영역은 프로젝트 밖의
+`../evaluation_private/`이며 `evaluation_answers.json`, `bottle_image_mask_pairs.json`,
+`ground_truth/`가 존재한다. 정답 본문·마스크를 읽거나 T06 정답 매핑을 복사하지 않았다.
+따라서 개별 정답 매핑 내용은 이번 점검에서 재검증하지 않았다.
+운영 fixture는 저장된 검사/로그를 사용하고 외부 평가 파일과 연결하지 않는다.
+
+실제 저장소를 사용하는 네 도구를 읽기 전용으로 조회하고 직렬화 결과를 검사했다.
+
+| 도구 | 허용된 반환 범위 | 격리 결과 |
+|---|---|---|
+| get_inspection_result | 중립 ID, 저장 상태·판정·점수·기준·측정값 | PASS |
+| analyze_image_quality | 저장된 영상 품질/통계, 당시 기준 기록 여부 | PASS |
+| get_execution_logs | 시간·level·stage·허용 event_code·살균 metrics, 원본 message 제외 | PASS |
+| get_inspection_history | 같은 product의 제한된 저장 이력, 각 항목 동일 allowlist | PASS |
+
+tools.py의 명시적 필드 allowlist, Enum/수치 검사, 메시지 제외가 평가 필드와
+원본 경로를 응답에서 제외한다. 실제 응답과 기존 평가 canary 회귀 테스트에서
+Ground Truth label/defect class/미탐 표시/평가 전용 필드 유출을 발견하지 않았다.
+이는 검사한 응답/경로의 판정이며 모든 식별자에서 의미를 추론할 수 없다는 보장은 아니다.
+
+### 최초 요청부터 최종 보고서까지
+
+- 최초 조사 입력은 고정 inspection_id와 조회 지시다. 프롬프트에는 T06의 외부 결함 사실이나
+  시나리오별 정답이 하드코딩되어 있지 않다. 일반적인 OK의 한계 설명은 정답 유출이 아니다.
+- Function Call은 `get_inspection_result(inspection_id=INSP-001406)`였다.
+  allowlist/고정 ID 검사 후 실제 Python 조회와 E0001 발급을 Mock SDK 흐름에서 확인했다.
+- `_context_view`는 모델로 전달할 응답에서 image_id를 제거하고 product_id를
+  TARGET-PRODUCT로 치환한다. Evidence Store에서도 같은 안전한 view를 확인했다.
+- `build_catalog`는 Trace/Evidence를 연결한 allowlist scalar만 토큰화한다.
+  실제 카탈로그, 독립 최종 요청의 직렬화 본문, DiagnosisDraft 변환 입력에서
+  평가 필드·정답 canary·결함 클래스·평가 경로가 없음을 확인했다.
+- 마지막 FunctionResponse는 로컬 조사 이력에 구성한 뒤 정상 조기 종료한다.
+  별도 조사 ACK를 요구하지 않고 최종 요청에는 독립 user 카탈로그만 전달한다.
+  기존 메시지 ID/서명 보존 및 독립 최종 요청 회귀 테스트도 통과했다.
+
+T06은 T01과 같은 `_normal_evidence_ready`를 사용한다. 여섯 상태가
+COMPLETED / OK / NORMAL / COMPLETED / OK / ALL_CHECKS_PASSED이며,
+유한한 실제 점수 ≤ 유한한 실제 기준일 때 조사 조기 종료한다.
+필수 도구는 결과 조회이며 정상 경로에서 logs/quality/history는 강제하지 않는다.
+이번 Mock은 **조사 1회 + 최종 JSON 1회**, Agent 도구 1개, E0001,
+핵심 관측 사실 6개로 완료됐다. ERROR/경고 정책 비적용도 확인했다.
+
+### 판정 및 자연어 안전성
+
+실제 SDK + httpx.MockTransport로 정상 보고서를 생성한 경우 JSON/Pydantic/
+Evidence/Pointer 검증이 통과하고 서버의 OK / OK / ALL_CHECKS_PASSED를 유지했다.
+NG/REINSPECT summary로 변경 시도, 실제 결함 단정 문장, 완전 무결점 보장 문장,
+가짜 K 토큰, 추가 평가 필드, 가짜 Evidence ID, 존재하지 않는 Pointer,
+실제 도구 값과 다른 관측값은 모두 FAILED로 거부됐다.
+
+현재 최종 모델 출력은 자유 서술이 아니라 다섯 필드 토큰 보고서다.
+서버가 제한된 코드로부터 문구를 생성하고 필수 한계를 추가하므로
+정상 summary는 “기록된 모델 판정과 종합 판정은 OK”와 무결점 비보증을 명시한다.
+T06 정상 기록에는 물리적 결함 가설을 뒷받침하는 signal이 없고 Mock 가능한 원인은 빈 목록이었다.
+이것은 현재 코드/토큰 계약의 보장이지 모든 자유 자연어 표현을 정규식으로
+완전히 검증했다는 뜻이 아니다. 향후 자유 서술 도입 시 재검토가 필요하다.
+OS 수준 파일 접근 격리까지 증명한 것도 아니다. 점검한 Agent 도구/프롬프트/카탈로그 경계를 기준으로 한다.
+
+### 오프라인 테스트 및 timeout
+
+- 신규 테스트 단독: `tests/test_agent_t06_isolation.py` **12 PASS**, 0.99초.
+- 정상/도구/Agent/최종 입력/단순 보고서/신규 T06 6개 모듈: **257 PASS**, 2.16초.
+- T03/T05 종료·공통 계측·운영 timeout·SDK timeout·보고서 통합 6개 모듈:
+  **181 PASS**, 6.45초.
+- 두 회귀 묶음의 서로 다른 테스트는 총 **438개**(신규 12 + 기존 426)다.
+  신규 단독 실행 12개를 다시 더해 고유 테스트 수를 부풀리지 않았다.
+- `python -m pytest`에 해당하는 pytest.main 호출을 Miniconda vision-insight Python에서 수행했다.
+  tempfile의 외부 임시 OUTPUT_DIR/LOG_DIR/TEST_DATA_DIR/JSONL/pytest basetemp로 격리했다.
+  HTTP/AsyncHTTP transport를 차단하고 허용된 실제 SDK MockTransport만 사용했다.
+  회귀 실행에는 evaluation_private 파일 open을 거부하는 audit guard도 적용했다.
+- 조사/최종 JSON 기본 **15초 / 15초**, 전체 **60초**, 안전 여유 **2초** 유지.
+  신규 실제 SDK MockTransport 요청의 SDK/HTTPX/X-Server-Timeout 15초 전파를 확인했고,
+  기존 wait_for/잔여 예산/재시도 회귀도 통과했다. 30초를 T06에 적용하지 않았다.
+- `pip check`: No broken requirements found. 전체 pytest는 반복하지 않았다.
+  이전 984 PASS / 경고 3건은 이번 실행 결과가 아니다.
+
+### READY 차단 원인과 다음 승인 사항
+
+후보 ID `t06_operational_groundtruth_isolated_1`에 기존 READY/잠금/결과는 없었다.
+그러나 `scripts/agent_validation_measurements.py:244`의 ready_manifest는
+scenario를 T03/T05로만 제한하여 T06을 INVALID_ATTEMPT_SETTINGS로 거부한다.
+`validate_attempt_timeout`은 READY 재검증 scenario를 T05로 고정한다.
+기존 수동 실행기는 T01/T03/T05 대상/사전조건을 갖고 있으며 T06 전용 실행기는 없다.
+tmp_path의 순수 plan_attempt 테스트에서도 T06 거부 및 파일 생성 0개를 확인했다.
+
+따라서 T06 READY 메타데이터를 수동으로 만들어 지원되는 회차처럼 표시하지 않았다.
+**신규 READY/잠금/결과 생성 0개, 실제 Gemini 분석 0회, API 요청 0회다.**
+Agent 정상 검사 정책이나 안전성 검증 실패가 아니라 수동 회차 계약의 미지원이 차단 사유다.
+후속 최소 변경안은 준비 helper의 명시적 T06 지원, 기존 T05 검증을 유지한
+scenario 검증 분리, T06 정상 판정용 준비/실행 분리 runner 및 충돌/ID/timeout/단일 실행 테스트다.
+scripts/runner 수정은 이번 범위 밖이므로 구현하지 않았고 별도 승인이 필요하다.
+그 후 신규 READY를 정확히 하나 준비하고, 실제 T06 분석 1회는 다시 별도 승인받아야 한다.
+실서버 모델의 도구 선택/최종 생성 성공/15초 충분성/사용량·비용은 아직 NOT TESTED다.
+T06 실제 검증이 향후 성공하더라도 PatchCore 미탐 문제가 해결됐다는 뜻은 아니다.
+
+실행 전 보호 파일 **169개 SHA256 모두 동일**: 운영 코드·계측기·기존 테스트,
+운영 JSONL, 모델/메타데이터, 기존 READY/FAIL/PASS/잠금, 발표 자료를 보존했다.
+신규 보호 범위 파일은 위 테스트 1개뿐이다. 기존 문서 변경과 임시 작업 폴더를 보존했다.
+외부 평가 정답은 이동/복사/수정하지 않았다. Git add/commit/push 0건이다.
+
+## T06 검증 인프라 최소 확장 — PARTIAL / 단위 테스트 실패 후 중단
+
+### 구현 범위
+
+직전 BLOCKED 원인은 READY 생성기의 T03/T05 제한, timeout READY 재검증의 T05 고정,
+T06 실행기 부재였다. 이번에는 검증 인프라와 직접 관련 테스트만 최소 확장했다.
+운영 Agent/ERROR 정책/프롬프트/스키마/config는 변경하지 않았다.
+
+- `scripts/agent_validation_measurements.py`: T06 READY 계약을 추가했다.
+  T06은 `INSP-001406`, `t06_operational_..._양의정수` 패턴, 최종 상한 15초만 허용한다.
+  다른 시나리오에서 T06 검사 ID 또는 t06_ 회차를 사용하는 혼합도 차단한다.
+  T03/T05 기존 manifest 필드와 기본 호출 계약을 유지했다.
+- 환경변수/Settings timeout 비교를 `validate_process_timeout`으로 재사용하며,
+  `validate_attempt_timeout(..., scenario=...)`를 추가했다. 기본 scenario는 기존 T05다.
+  T06은 명시적으로 scenario=T06으로 검증하며 30초를 선택할 수 없다.
+- `data/outputs/manual_validation/run_t01_simple_e2e_once.py`: 정상 검사 사전 점검 함수의
+  별칭 NORMAL_OFFLINE_PREFLIGHT를 보존해 재사용하고, 결과 저장을 exclusive create로 바꿨다.
+  기존 결과를 덮어쓰지 않으며 기존 실행 잠금도 그대로 사용한다.
+- `data/outputs/manual_validation/run_t06_simple_e2e_once.py`: 작은 T06 전용 wrapper를 추가했다.
+  T01 정상 검사 사전 점검과 기존 T03 계측/공통 단일 실행 경로를 재사용한다.
+  T05 ERROR probe나 17개 사실 조건/IMAGE_LOAD_FAILURE를 적용하지 않는다.
+- `tests/test_agent_t06_infrastructure.py`: 신규 파라미터화 테스트 38개를 추가했다.
+  기존 `tests/test_agent_t06_isolation.py`의 준비 미지원 assertion은 지원된 순수 계획 검증으로
+  갱신했으며, 기존 격리·공격적 입력 거부 테스트는 유지했다.
+
+T06 wrapper는 `--attempt-id`와 준비/오프라인/명시적 단일 실행 모드 중 하나가 필수다.
+기본 실행이나 import만으로 분석을 시작하지 않는다. 준비 모드는 저장된 정상 판정과
+원본 존재/점수·기준, 환경·Settings, 충돌, 민감 정보 전달 경로를 검사한 후에만 준비한다.
+후속 실제 실행은 READY를 다시 검사하고 기존 배타적 잠금을 획득한 뒤 분석 최대 1회를 수행한다.
+조사 15초 / 최종 15초 / 전체 60초 / 여유 2초 / 재시도 0회를 유지한다.
+
+### 오프라인 실행과 통과 범위
+
+실제 운영 경로 밖 tempfile에 OUTPUT_DIR/LOG_DIR/TEST_DATA_DIR/JSONL/pytest basetemp를 격리했다.
+실제 HTTP/AsyncHTTP transport를 차단했고, evaluation_private 파일 open을 거부하는
+audit guard를 적용했다. 평가 정답 파일/마스크/라벨은 접근하지 않았다.
+
+첫 실행 명령 범위는 다음 두 모듈이다.
+
+`pytest tests/test_agent_t06_infrastructure.py tests/test_agent_t06_isolation.py -q -p no:cacheprovider --basetemp <외부 임시 경로>`
+
+**결과: 47 PASS / 3 FAIL, 5.76초.** 신규 38개는 35 PASS / 3 FAIL,
+기존 T06 격리 12개는 모두 PASS다. 이는 실제 Gemini E2E 결과가 아니다.
+
+통과한 항목:
+
+- 메모리 계획 및 임시 READY의 T06 고정 검사 ID/회차 패턴/15초 계약.
+- 다른 검사 ID, T05/T06 회차 혼합, T06 최종 30초, READY/잠금/결과 충돌 차단.
+- import 시 Gemini client 생성 없음, CLI 모드 생략/혼합 차단,
+  정상 저장 상태 불일치/키 없음/환경 timeout 불일치의 요청 전 차단.
+- 실제 SDK + MockTransport + 정식 FastAPI ASGI 경로의 T06 정상 Mock:
+  조사 1회 + 최종 JSON 1회, Python 결과 도구 1회/E0001,
+  정상 종료 NORMAL, 핵심 사실 6개, Pydantic/Evidence/Pointer/판정 불변 PASS.
+- Settings/SDK/HTTPX/X-Server-Timeout/local wait_for 15초/15초 전파,
+  전체 60초와 SDK 최초 시도 1회(자동 재시도 0회) 확인.
+- 조사 또는 최종 JSON의 Mock HTTP 504는 FAIL/HTTP 502로 남기고 추가 시도하지 않음.
+  성공/실패 모두 임시 실행 결과와 잠금을 보존하고 동일 회차 두 번째 실행 차단.
+- 기존 T06 도구/카탈로그/요청/변환 입력 격리 및 근거 없는 판정·결함 주장 거부 회귀.
+
+임시 테스트 디렉터리에서 생성한 READY/잠금/결과는 오프라인 fixture일 뿐,
+운영 수동 검증 디렉터리의 신규 실서버 회차가 아니다.
+
+### 실패 3건의 원인 및 중단
+
+실패 테스트는 모두 `test_legacy_scenarios_keep_timeout_contract`의
+T03/30초, T05/15초, T05/30초 세 파라미터다.
+각각 원래 scenario로 준비/timeout 검증은 통과했으나, 이를 scenario=T06으로
+다시 검증하는 음성 케이스에서 오류 코드 assertion이 실패했다.
+
+- 신규 테스트 기대: INVALID_READY_MANIFEST.
+- 실제 코드 결과: INVALID_ATTEMPT_SETTINGS.
+- 코드 경로: validate_attempt_timeout → validate_ready_attempt → ready_manifest(T06).
+  실제 manifest의 scenario 차이를 먼저 분류하지 않고, T06 계약의 검사 ID/회차 검사가
+  먼저 실행되어 INVALID_ATTEMPT_SETTINGS를 반환했다.
+
+교차 시나리오가 실제로 허용되거나 Gemini 호출로 진행된 것은 아니다.
+다만 신규 인프라의 오류 분류 계약이 테스트와 맞지 않으므로 전체 완료/PASS로 선언하지 않는다.
+사용자의 테스트 실패 시 중단 지시에 따라 assertion 삭제·완화, 안전 정책 변경,
+추가 구현 또는 테스트 재실행을 진행하지 않았다.
+
+최소 후속 수정 후보는 timeout validator가 읽은 READY의 scenario와 호출자가 선택한
+scenario의 불일치를 명시적으로 INVALID_READY_MANIFEST로 분류한 뒤 기존 상세 계약을
+검증하는 것이다. 다른 오류를 무조건 성공으로 바꾸거나 광범위하게 삼켜서는 안 된다.
+이 수정 및 재검증은 다음 사용자 지시를 기다린다.
+
+### 미실행 범위 및 보호
+
+실패로 인해 T01/T03/T05 기존 전체 회귀, 기존 15→30→15 SDK 계측 회귀,
+전체 Agent 테스트와 전체 pytest는 실행하지 않았다. 최근 984 PASS / 경고 3건은 과거 기록이며
+이번 결과가 아니다. 기존 T05 실제 PASS 및 T06 실제 NOT TESTED 상태도 변경하지 않았다.
+`pip check`는 No broken requirements found, `git diff --check`는 공백 오류 없이 통과했다.
+
+실행 전 기존 파일 170개를 SHA256으로 비교했다. 변경된 기존 파일은 허용 범위의
+계측 helper, 공통 T01 runner, T06 격리 테스트 3개뿐이며 나머지 **167개는 동일**했다.
+추가 파일은 T06 runner와 신규 테스트 2개다. 운영 JSONL/모델·메타데이터/기존 READY·잠금·
+PASS·FAIL 결과/발표 자료를 보존했다. 기존 문서 변경과 임시 작업 폴더도 되돌리지 않았다.
+
+**실제 Gemini 분석 0회 / API 요청 0회 / 운영 회차 READY·실행 잠금·실제 결과 생성 0건.**
+후보 `t06_operational_groundtruth_isolated_1`은 생성하거나 실행하지 않았다.
+Git add/commit/push 0건. 현재 인프라 확장은 PARTIAL이며 READY 준비 단계로 넘어가지 않는다.
+오류 분류 정합화와 관련/전체 회귀 완료 후 별도의 READY 준비 승인이 필요하고,
+실제 T06 E2E 단일 실행은 그 이후 다시 별도 승인을 받아야 한다.
+
+## T06 READY/실행 오류 코드 계약 재검토 및 전체 오프라인 회귀 — PARTIAL
+
+### 실패 3건 재현과 책임 구분
+
+직전 실패 3건만 먼저 재실행하여 **3 FAIL, 1.02초**로 동일한 불일치를 재현했다.
+모두 `tests/test_agent_t06_infrastructure.py::test_legacy_scenarios_keep_timeout_contract`다.
+세 경우의 회차 ID는 legacy_round이며, 정상 READY를 만든 뒤 시나리오만 T06으로 바꿔
+timeout validator를 호출한다. READY 원문은 변조되지 않는다.
+
+| 기존 정상 READY scenario / 검사 ID / 최종 상한 | 다시 요청한 설정 | 직전 기대 / 실제 | 실제 위반 |
+|---|---|---|---|
+| T03 / INSP-001398 / 30초 | scenario=T06, 나머지 기존 값 유지 | INVALID_READY_MANIFEST / INVALID_ATTEMPT_SETTINGS | T06의 고정 검사 ID·회차 패턴·15초 계약 불충족 |
+| T05 / INSP-001405 / 15초 | scenario=T06, 나머지 기존 값 유지 | 동일 | T06 고정 검사 ID·회차 패턴 불충족 |
+| T05 / INSP-001405 / 30초 | scenario=T06, 나머지 기존 값 유지 | 동일 | T06 고정 검사 ID·회차 패턴·15초 계약 불충족 |
+
+실제 경로는 validate_attempt_timeout → validate_ready_attempt → ready_manifest(T06)다.
+프로세스 timeout 문법/Settings 일치와 READY 존재를 확인한 뒤,
+선택된 scenario로 기대 manifest를 구성하면서 허용되지 않은 T06 조합이 거부된다.
+READY 비교 자체가 끝나기 전에 실행 설정의 부적합성이 확인된 것이다.
+이는 READY 내용이 잘못된 경우와 다르므로 세 테스트의 기존 기대 코드가 잘못 지정됐다고 판단했다.
+
+### 확인한 오류 코드 계약
+
+기존 T03/T05 준비 테스트와 T05 manifest 변조 테스트, 현재 helper의 발생 위치를 근거로 구분했다.
+실제 과거 READY 3개의 scenario/검사 ID/15·30초 프로필도 읽기 전용으로 확인했으며 변경하지 않았다.
+
+| 코드 | 확인된 책임/범위 |
+|---|---|
+| INVALID_ATTEMPT_SETTINGS | ready_manifest가 허용하지 않는 scenario/검사 ID/회차/최종 상한 조합. 준비 또는 기대 manifest 구성 자체가 불가능함 |
+| INVALID_READY_MANIFEST | 유효한 선택 설정으로 기대 manifest를 구성할 수 있지만 저장된 READY가 불일치하거나 읽기/파싱/필수 구조 검증에 실패함 |
+| INVALID_ATTEMPT_TIMEOUT / INVALID_PROCESS_TIMEOUT | 기존의 timeout 값/환경변수 문법 오류 분류를 그대로 유지 |
+| PROCESS_SETTINGS_TIMEOUT_MISMATCH | 환경변수 선택값과 Settings 불일치. READY를 정상으로 읽기 전에도 차단 가능 |
+| ATTEMPT_PROCESS_TIMEOUT_MISMATCH | 유효한 READY의 승인 상한과 프로세스 선택 상한 불일치 |
+| ATTEMPT_COLLISION / ATTEMPT_ALREADY_USED | 기존 READY/잠금/결과 충돌 및 이미 사용된 실행 회차 |
+
+이 구분은 모든 오류의 범용 우선순위 재설계가 아니라 현재 helper의 계약을 확인한 것이다.
+manifest의 timeout 값에는 기존 세부 오류 코드가 적용될 수 있으며 이를 임의로 통일하지 않았다.
+직전 문서의 “scenario 비교를 먼저 추가” 제안은 확정 수정이 아닌 후보였다.
+이번에는 caller 설정 자체가 유효하지 않다는 점을 확인해 더 작은 테스트 수정만 선택했다.
+
+### 최소 수정과 차단 보강
+
+이번 작업에서 새로 수정한 코드는 `tests/test_agent_t06_infrastructure.py`와 이 문서뿐이다.
+helper/runner/backend 코드는 직전 작업 상태 그대로 보존했다.
+
+- 기존 3건의 정확한 기대를 `^INVALID_ATTEMPT_SETTINGS$`로 정정했다.
+  예외 assertion을 삭제하지 않았고, SDK client 미생성·READY 원문 보존·잠금/결과 미생성도 추가 검증했다.
+- 신규 8건: caller는 유효한 T06 설정으로 고정한 채 READY의 scenario(T03/T05),
+  검사 ID, 회차 ID, state, approval_required, model, schema_version만 변조한다.
+  이 경우는 정확히 `^INVALID_READY_MANIFEST$`로 거부됨을 확인했다.
+- 신규 4건: Settings/환경변수 불일치, 비정상 환경변수, 0초 설정의 기존 세부 코드를 검증했다.
+  이들을 manifest 오류로 일괄 변환하지 않는 것도 확인했다.
+- 모든 신규 음성 케이스에서 READY를 자동 보정하거나 잠금/결과를 만들지 않는다.
+  테스트를 skip/xfail 처리하거나 허용 조건을 완화하지 않았다.
+
+### 단계별 실제 실행 결과
+
+Miniconda vision-insight Python에서 pytest.main으로 아래 범위를 순서대로 실행했다.
+OUTPUT_DIR/LOG_DIR/TEST_DATA_DIR/검사 JSONL/로그 JSONL/pytest basetemp는 외부 tempfile로 격리했다.
+실제 HTTP·AsyncHTTP transport와 외부 평가 파일 open을 차단하고 SDK MockTransport만 허용했다.
+
+| 범위 | 이번 결과 |
+|---|---|
+| 기존 실패 3건, 기대 계약 정정 후 | **3 PASS**, 0.88초 |
+| T06 인프라 모듈 전체 | **50 PASS**, 5.52초 (이번 신규 12개 포함) |
+| T06 Ground Truth 격리 | **12 PASS**, 1.07초 |
+| T01/T03/T05 공통 계측·ERROR 계측·timeout 계측·T05 회차/사전점검 5개 모듈 | **147 PASS**, 5.95초 |
+| Agent 전체 test_agent_*.py | **941 PASS**, 13.74초 |
+| 전체 tests/ — 정확히 1회 | **1041 PASS / 1 FAIL / 4 SKIP / 경고 2건**, 27.67초 |
+
+위 범위는 서로 중복되므로 개수를 합해 고유 테스트 수로 보고하지 않는다.
+최근 984 PASS / 경고 3건은 이전 기록이며 이번 결과로 대체해 주장하지 않는다.
+수정한 ERROR/정상/경고 정책은 없고, Agent 회귀에서 T01/T03/T05/T06 상태 전이,
+IMAGE_LOAD_FAILURE, 17개 ERROR 사실, 판정 불변 및 Evidence/Pointer 검증을 확인했다.
+기존 15→30→15 SDK 계측도 통과했으며 조사 15초/최종 기본 15초/승인된 T05 최종 30초,
+전체 60초/여유 2초/자동·수동 재시도 0회 계약을 유지했다.
+
+T06 정상 runner Mock은 조사 1회 + 최종 JSON 1회, 결과 도구 1회/E0001,
+NORMAL 종료, 최종 JSON/Pydantic/Evidence 검증과 저장 OK 판정 불변을 통과했다.
+조사/최종 JSON의 Mock 504 실패 기록 보존과 동일 회차 재실행 차단도 통과했다.
+외부 Ground Truth 본문·라벨·마스크를 읽지 않았으며 기존 격리/근거 없는 주장 거부를 유지했다.
+이 결과는 실제 T06 Gemini E2E 성공이나 OS 수준 완전 격리 증명이 아니다.
+
+### 전체 pytest의 미해결 실패
+
+실패 테스트는 `tests/test_data_isolation_and_security.py::test_t03_synthetic_injection_parameters_not_leaked`다.
+해당 기존 테스트는 IMG-BOTTLE-INJ-0001이 이미 등록돼 있다고 가정하고
+POST /inspections의 HTTP 201을 기대하지만 이번에는 **HTTP 400**을 반환했다.
+
+테스트 환경의 TEST_DATA_DIR를 빈 외부 임시 경로로 격리했기 때문에 초기 이미지 registry에
+기존 T03 주입 이미지가 없었다. 코드상 injected_images에서 파일을 발견해야만 해당 중립 ID를
+등록하며, 미등록 ID는 KeyError → HTTP 400으로 처리한다.
+별도 test_day3_scenarios의 T03 생성 fixture는 해당 테스트보다 뒤에 실행된다.
+따라서 이번 full suite는 준비된 주입 fixture에 대한 테스트 순서/환경 의존성을 드러냈다.
+이는 오류 코드 정합화 대상 코드가 실행을 허용한 결과가 아니다.
+동일 주입 자산 부재 시 skip하는 기존 T03 테스트 조건도 확인했지만,
+이번 -q 출력에서 개별 SKIP 사유는 별도로 수집하지 않았다.
+
+사용자 제한에 따라 전체 pytest를 두 번 실행하지 않았고,
+범위 밖 `test_data_isolation_and_security.py`, 이미지/운영 코드 또는 테스트 fixture를 수정하지 않았다.
+SKIP을 새로 추가하거나 실패를 숨기지 않았다. 전체 회귀 통과 기준은 아직 미충족이므로 **PARTIAL**이다.
+다음 작업 후보는 기존 T03 fixture를 외부 격리 경로에 명시적으로 준비하는 테스트 실행 환경 보완이다.
+새로운 이미지 일반화 실험이나 실제 Gemini 분석이 아니라 기존 fixture 준비 문제이며,
+이번 허용 범위를 넘어서는 보완 및 전체 회귀 재실행은 별도 사용자 지시를 기다린다.
+
+### 보호 및 종료
+
+실행 전 기존 보호 파일 **172개**와 SHA256을 비교했다. 허용된 위 테스트 파일 1개 외
+**171개 모두 동일**했다. 운영 JSONL, 모델/임계값 메타데이터, backend와 계측 helper/runner,
+기존 READY·잠금·실제 E2E 결과, 발표 자료를 보존했다. 기존 사용자 변경사항도 되돌리지 않았다.
+외부 평가 본문 접근 금지에 따라 Ground Truth 파일 내용 해시는 계산하지 않았다.
+`pip check`: No broken requirements found. `git diff --check`: 공백 오류 없음.
+
+실제 Gemini 분석 **0회**, 실제 Gemini API 요청 **0회**, 운영 신규 READY·실행 잠금·실제 결과 **0건**,
+Git add/commit/push **0건**이다. 임시 경로의 Mock READY/잠금/결과만 테스트 fixture로 사용했다.
+T05 기존 실제 PASS 및 T06 실제 NOT TESTED 상태를 유지했다.
+오류 코드 계약 3건은 해결됐지만 전체 회귀 1건이 남아 있으므로 신규 T06 READY를 준비하지 않고 중단한다.
+
+## 야간 후속 검증 — T03 fixture 수정 / 전체 회귀 / T06 READY 사전 감사
+
+**최종 상태 PASS. T06은 READY_PRECHECK_PASS이며, 실제 READY 생성 및 Gemini E2E 실행은 하지 않았다.**
+
+### 1단계: 기존 HTTP 400 재확인 및 최소 테스트 수정
+
+기존 실패를 빈 외부 임시 TEST_DATA_DIR/JSONL에서 직접 재현했다.
+POST /inspections에 IMG-BOTTLE-INJ-0001을 전달했을 때 실제 응답은 HTTP 400이며,
+detail은 `Image ID 'IMG-BOTTLE-INJ-0001' is not registered or allowed by server.`였다.
+동시에 registry.contains 결과는 false였고, 저장 경로는 외부 임시 디렉터리임을 확인했다.
+
+기존 테스트는 입력 fixture를 요청하지 않고 이미 등록된 T03 실행 산출물을 암묵적으로 가정했다.
+registry는 Settings.absolute_injected_images_path에서 발견한 파일만 등록한다.
+다른 모듈 test_day3_scenarios의 생성 fixture는 나중에 실행되므로 독립 실행을 보장하지 못했다.
+
+수정은 `tests/test_data_isolation_and_security.py` 한 파일에만 적용했다.
+새 function-scoped fixture `isolated_t03_input`이 기존 중립 이름의 테스트 이미지
+`test_data/injected_images/IMG-BOTTLE-INJ-0001.png`를 pytest tmp_path에 복사한다.
+복사본과 원본 SHA256 일치 및 서로 다른 경로를 확인하고,
+그 복사본만 등록한 독립 ImageRegistry와 tmp_path의 JsonlInspectionStorage를 테스트에 주입한다.
+monkeypatch는 테스트 종료 시 복원되며 기존 전역 registry/운영 저장소를 변경하지 않는다.
+fixture 종료 시 원본 이미지 SHA256도 다시 확인한다.
+
+원본 이미지 생성/수정, 새 모델 추론 정책, HTTP 201 기대 변경,
+누출 assertion 삭제, skip/xfail 추가는 하지 않았다.
+기존 테스트의 WARNING_LOW_BRIGHTNESS / REINSPECT 및 합성 주입 정보 비노출 검증을 유지했다.
+신규 테스트 함수는 추가하지 않았으며 기존 테스트 1개와 직접 연결된 fixture만 보완했다.
+
+| 1단계 실행 범위 | 결과 |
+|---|---|
+| 실패했던 T03 보안 테스트 단독 | **1 PASS / 경고 2건**, 9.22초 |
+| test_data_isolation_and_security.py 전체 | **7 PASS / 경고 2건**, 9.43초 |
+
+1단계 통과 후에만 2단계를 진행했다.
+
+### 2단계: 전체 오프라인 회귀
+
+Miniconda vision-insight Python에서 pytest.main을 사용했다. 실행 명령에 대응하는 범위는
+`pytest <아래 범위> -q -rs -p no:cacheprovider --basetemp <외부 임시 경로>`다.
+OUTPUT_DIR/LOG_DIR/TEST_DATA_DIR/검사·로그 JSONL도 각 실행 자식 프로세스의 외부 tempfile로 격리했다.
+실제 HTTP/AsyncHTTP transport 및 외부 평가 파일 open은 차단했다.
+
+| 범위 | 이번 실제 결과 |
+|---|---|
+| T06 인프라 및 Ground Truth 격리 2개 모듈 | **62 PASS**, 5.63초 |
+| 전체 Agent test_agent_*.py | **941 PASS**, 13.60초 |
+| 전체 tests/ — 이번 작업에서 정확히 1회 | **1042 PASS / 0 FAIL / 4 SKIP / 경고 2건**, 27.68초 |
+| pip check | No broken requirements found |
+| git diff --check | 공백 오류 없음 |
+
+범위가 겹치므로 테스트 개수를 합산하지 않는다. 기존 984 PASS나 직전 1041 PASS/1 FAIL은
+이번 실행 결과가 아니며 과거 기록으로 보존한다.
+941개 Agent 회귀에는 T01/T03/T05/T06 종료 경계, ERROR 17개 사실,
+IMAGE_LOAD_FAILURE 계측, 오류 코드 계약, 회차 충돌·재실행 차단,
+15→30→15 SDK timeout 계측 및 T06 15→15 계약이 포함된다.
+
+SKIP 4건은 모두 기존 테스트의 주입 이미지 부재 조건이며 새로 추가하지 않았다.
+
+- tests/test_day3_5_integration.py:221 — No injected images registered.
+- tests/test_day3_5_step4.py:147 — No fault-injected images found.
+- tests/test_day3_5_step4_5.py:173 및 :258 — T03 injected image not present.
+
+수정한 fixture는 대상 보안 테스트에만 이미지를 제공하므로 다른 모듈의 기존 전역 registry에
+주입 이미지를 남기지 않는다. 해당 네 이미지 통합 케이스까지 실행됐다고 주장하지 않는다.
+T03 보안 테스트와 Agent 경고 회귀는 별도로 통과했다.
+경고 2건은 timm/anomalib의 기존 FutureWarning이며 라이브러리를 변경하지 않았다.
+전체 pytest 종료 코드 0 및 FAIL 0을 확인한 후에만 3단계를 진행했다.
+
+### 3단계: READY 파일 없는 T06 사전 감사
+
+후보 `t06_operational_groundtruth_isolated_1`, 대상 `INSP-001406`으로 기존 T06 wrapper를
+읽기 전용으로 점검하고 `offline_preflight(require_ready=False)`만 실행했다.
+이 경로는 plan_attempt의 메모리 manifest를 검증하며 prepare/실행 모드는 호출하지 않는다.
+SDK client 생성, SDK sync/async 전송, 실제 HTTP transport, AgentService.analyze를 차단한 상태였다.
+
+| 감사 항목 | 결과 |
+|---|---|
+| 실제 저장 status / result / final_result / final_reason_code | COMPLETED / OK / OK / ALL_CHECKS_PASSED |
+| 고정 검사 ID·T06 회차 패턴 | PASS |
+| 후보 READY·실행 잠금·결과 충돌 | 없음; 점검 전후 모두 파일 부재 |
+| 조사 / 최종 JSON 기본 / 전체 / 안전 여유 | 15초 / 15초 / 60초 / 2초 |
+| 모델 / SDK | gemini-3.8-flash / google-genai 2.31.0 유지 |
+| 도구 라운드 / 실행 상한 | 4 / 8 유지 |
+| API 키 | 존재 여부만 확인, 값 비노출; 실제 인증 성공은 미검증 |
+| 자동·수동 재시도 | 0회 계약 유지 |
+| 네트워크 차단 하 실제 저장 기록 Preflight | PASS |
+| 실제 분석 / 실제 Gemini HTTP / 회차 파일 생성 | 0회 / 0회 / 0건 |
+
+이어 기존 `test_real_sdk_mock_transport_preserves_isolated_normal_path[None]`을
+별도 실행해 **1 PASS, 0.80초**를 확인했다. 운영 저장 기록을 읽되 SDK는 MockTransport만 사용한다.
+정상 조사 1회 + 독립 최종 JSON 1회, 결과 도구 1개/E0001,
+핵심 사실 6개, Pydantic/Evidence/JSON Pointer 검증 및 저장 OK 판정 불변이 통과했다.
+도구 응답·Evidence Store·카탈로그·최종 입력의 Ground Truth 비노출을 확인했다.
+단일 실행과 성공/실패 후 재실행 차단은 앞선 T06 인프라 Mock 회귀에서 통과했다.
+
+**감사 판정: READY_PRECHECK_PASS.** 이는 파일을 생성한 READY 상태나 실제 T06 E2E PASS가 아니다.
+서버의 실제 도구 선택, 15초 내 실제 최종 JSON 성공, 실제 토큰·비용은 여전히 NOT TESTED다.
+외부 평가 정답/마스크를 읽거나 복사하지 않았으며 OS 수준 완전 격리를 주장하지 않는다.
+
+### 보호 및 종료
+
+기존 보호 파일 **172개 SHA256**을 비교했다. 허용된 보안 테스트 파일 1개 외
+**171개 모두 동일**했다. backend/계측 코드/기존 테스트/운영 JSONL/모델·메타데이터,
+기존 READY·잠금·PASS·FAIL 결과, 발표 PPT와 정적 데모를 보존했다.
+기존 T03 주입 이미지와 기준 원본 이미지 2개의 실행 전후 SHA256도 모두 동일했다.
+외부 Ground Truth 내용 해시는 본문 접근 금지에 따라 계산하지 않았다.
+사용자·다른 에이전트의 기존 변경사항 및 임시 작업 폴더를 되돌리지 않았다.
+
+실제 Gemini API 요청 **0회**, 실제 Gemini 분석 **0회**, 운영 신규 READY·잠금·실제 분석 결과 **0건**,
+Git add/commit/push **0건**이다. 임시 경로의 Mock fixture 산출물은 실제 검증 회차가 아니다.
+세 단계 완료 후 중단했다. 이후 T06 READY 생성과 실제 Gemini 단일 분석은
+각각 별도 사용자 승인이 필요하다. 기존 T01/T03/T05 실제 PASS 및 T06 실제 NOT TESTED를 유지한다.
+
+## T06 실제 E2E 신규 회차 READY 생성 전용 — READY
+
+**최종 상태 READY. 실제 Gemini E2E는 NOT TESTED이며 이번에는 분석을 실행하지 않았다.**
+
+| 항목 | 준비 결과 |
+|---|---|
+| 신규 회차 | t06_operational_groundtruth_isolated_1 |
+| 검사 ID | INSP-001406 |
+| 파일 | data/outputs/manual_validation/t06_operational_groundtruth_isolated_1_ready.json |
+| 상태 / 승인 필요 여부 | READY / approval_required=true |
+| 실제 분석 / Gemini HTTP | 0회 / 0회 |
+| 신규 실행 잠금 / 실제 결과 | 0건 / 0건 |
+| 모델 / SDK / API | gemini-3.8-flash / google-genai 2.31.0 / Developer API v1beta |
+| 조사 / 최종 JSON / 전체 / 안전 여유 | 15초 / 15초 / 60초 / 2초 |
+| SDK 자동 / 수동 재시도 | 0회 / 0회 |
+
+### 생성 전 확인
+
+직전 야간 후속 섹션의 READY_PRECHECK_PASS와 현재 T06 wrapper/helper를 재확인했다.
+기존 Git 변경사항을 보존했으며 코드·설정·테스트를 수정하지 않았다.
+수동 검증 디렉터리의 후보 ID 접두어를 재귀 점검하여 READY·잠금·결과뿐 아니라
+동일 회차의 다른 산출물도 없음을 확인했다. 다른 회차 이름은 선택하지 않았다.
+
+실제 저장 기록을 읽어 다음 값을 모두 정확히 확인했다.
+status=COMPLETED, result=OK, final_result=OK, final_reason_code=ALL_CHECKS_PASSED,
+anomaly_score=32.26792526245117, decision_threshold=34.1442.
+이벤트는 INSPECTION_STARTED → IMAGE_LOADED → ANALYSIS_COMPLETED → INFERENCE_STARTED →
+INFERENCE_COMPLETED → INSPECTION_COMPLETED 순서였다. 원본을 정정하거나 새 검사를 실행하지 않았다.
+
+외부 평가 파일·본문·라벨·이미지·마스크에 접근하지 않았다.
+메타데이터에는 실행 ID·고정 검사 ID·모델/SDK/API·시간 제한·승인/산출물 이름만 포함하며
+외부 정답, 실제 결함 여부/종류/위치, 평가 경로 또는 미탐 설명을 넣지 않았다.
+회차 ID 자체는 사용자가 지정한 불투명 식별자이며 Agent의 운영 사실로 전달하지 않는다.
+
+### 최소 오프라인 검증 및 공식 생성 경로
+
+기존 두 모듈을 외부 tempfile의 출력/로그/JSONL/pytest basetemp로 격리해 실행했다.
+
+`pytest tests/test_agent_t06_infrastructure.py tests/test_agent_t06_isolation.py -q -p no:cacheprovider --basetemp <외부 임시 경로>`
+
+**이번 결과: 62 PASS, 5.64초.** 고정 검사/회차 계약, 잘못된 ID와 설정 차단,
+READY/잠금/결과 충돌, 단일 실행 및 재실행 차단, SDK MockTransport의 15초/15초 전파,
+Settings/HTTPX/X-Server-Timeout/wait_for 및 60초·2초 예산,
+원본 기록 기반 카탈로그와 보고서의 Ground Truth 비노출을 재검증했다.
+실제 Google 전송은 차단했다. 전체 pytest는 반복하지 않았다.
+이전 1042 PASS / 0 FAIL / 4 SKIP / 경고 2건은 직전 야간 작업의 결과다.
+
+모든 사전 점검 통과 후 기존 runner를 정확히 한 번 준비 모드로 호출했다.
+
+`run_t06_simple_e2e_once.py --attempt-id t06_operational_groundtruth_isolated_1 --prepare-only`
+
+실행 자식 프로세스 안에서만 AGENT_FINAL_MODEL_TIMEOUT_SECONDS=15를 명시했다.
+.env/전역 환경/운영 기본값은 바꾸지 않았다. 실행 승인 모드는 사용하지 않았다.
+SDK client 생성, SDK sync/async 요청, 실제 HTTP transport, AgentService.analyze를 차단했다.
+별도 audit guard는 프로젝트 안에서 승인된 READY 파일 외의 쓰기도 거부했다.
+공식 준비 경로의 정상 검사 Preflight PASS 후 exclusive create로 READY 한 개만 생성했다.
+
+생성 후 validate_ready_attempt와 validate_attempt_timeout(scenario=T06)으로 다시 검증했다.
+정확한 회차/검사 ID, schema_version=1, state=READY, T06, 15/15/60/2,
+analysis_attempts=0, gemini_http_requests=0, approval_required=true를 확인했다.
+접두어 재점검 결과 해당 READY 한 개만 존재하고 실행 잠금·결과 파일은 없었다.
+API 키는 존재 여부만 확인했으며 기록하지 않았다. SDK client 생성과 실제 분석 함수 호출도 0회였다.
+
+### 보호 및 이후 경계
+
+실행 전 보호 파일 **174개 SHA256 모두 동일**했다. 운영 JSONL과 기존 검사 기록,
+모델/임계값 메타데이터, 기존 E2E PASS/FAIL·READY·잠금, 코드/테스트/수동 실행기,
+발표 자료/정적 데모 및 확인 대상 원본 이미지를 보존했다.
+추가 파일은 승인된 위 READY 메타데이터 1개뿐이며 문서에는 이 섹션만 추가했다.
+Ground Truth 내용 해시는 본문 접근 금지에 따라 계산하지 않았다.
+`git diff --check`는 공백 오류 없이 통과했다. Git add/commit/push 0건이다.
+
+실제 T06 모델의 도구 선택, 서버 인증 성공, 15초 내 최종 JSON 생성,
+실제 토큰·비용과 최종 E2E 보고서 검증은 아직 NOT TESTED다.
+이 READY를 실제 E2E PASS나 모델 미탐 개선으로 해석하지 않는다.
+파일 생성·재검증 후 중단했으며, 실제 T06 단일 분석은 별도 사용자 승인을 기다린다.
+
+## T06 Ground Truth 격리 실제 Gemini E2E 단일 검증 — FAIL
+
+### 회차, Preflight 및 실행 범위
+
+- 회차: `t06_operational_groundtruth_isolated_1`, 검사: `INSP-001406`.
+- 계측 시각: 2026-10-16T14:53:07.544113+00:00.
+- 모델 gemini-3.8-flash, google-genai 2.31.0, Developer API v1beta 유지.
+- READY 파일 내용과 회차/검사 ID, 사용 흔적 부재를 재확인했다. 생성 당시 READY 외에
+  동일 접두어의 실행 잠금·결과·기타 산출물이 없었다.
+- 실제 저장소에서 COMPLETED / OK / OK / ALL_CHECKS_PASSED,
+  anomaly_score=32.26792526245117, decision_threshold=34.1442를 정확히 재확인했다.
+- SDK client 생성·sync/async SDK 요청·실제 HTTP transport·AgentService.analyze를 차단한
+  기존 `--offline-only` Preflight가 PASS였다. 키는 존재 여부만 확인했다.
+- 공식 `run_t06_simple_e2e_once.py --attempt-id t06_operational_groundtruth_isolated_1
+  --approved-single-analysis` 경로로 실제 분석을 **정확히 1회** 시작했다.
+  AGENT_FINAL_MODEL_TIMEOUT_SECONDS=15는 실행 자식 프로세스에만 적용했다.
+  운영 기본값/전역 환경/프롬프트/스키마/모델/코드 변경은 없었다.
+- 정식 FastAPI POST /analyze/INSP-001406를 IN_PROCESS_ASGI로 1회 호출했다.
+  실제 Gemini 서버 요청이며, 별도 외부 FastAPI 서버/TCP 배포 경로 검증은 아니다.
+
+**최종 결과 FAIL: FastAPI HTTP 502 / analysis_status=FAILED / GEMINI_REQUEST_FAILED.**
+
+### 실제 요청 순서와 timeout
+
+| 요청 | 단계 | HTTP | SDK timeout | HTTPX / X-Server-Timeout / wait_for | HTTP 시간 | 입력 / 출력 / Thinking / 전체 토큰 |
+|---|---|---|---|---|---|---|
+| 1 | FUNCTION_CALLING: 검사 결과 조회 | 200 | 15000ms | 15 / 15 / 15초 | 2.414212초 | 1279 / 28 / 58 / 1365 |
+| 2 | STRUCTURED_OUTPUT: 최종 JSON 생성 | **504** | 15000ms | 15 / 15 / 15초 | **13.642747초** | 모두 UNKNOWN |
+
+SDK wrapper 시간은 각각 2.443986초 / 13.644746초로 HTTP 전송 시간과 구분한다.
+HTTPX는 request extensions의 connect/read/write/pool 모두 15초였다.
+서버 전달 헤더와 SDK/transport timeout 충돌은 없었으며 timeout_propagation_valid=true였다.
+첫 요청 시작 시 Agent 잔여 예산은 약 59.984초, 두 번째 SDK 진입 시 약 57.546초
+(전송 경계 약 57.531초)였다. 전체 60초와 안전 여유 2초는 유지됐다.
+최종 요청을 30초로 바꾸거나 실패 후 추가 요청하지 않았다.
+
+두 번째 요청은 Google HTTP 504 / DEADLINE_EXCEEDED, SDK ServerError였다.
+안전한 reason=UNKNOWN, field_violations=[]다.
+SDK 예외가 GEMINI_REQUEST_FAILED로 처리되고 FastAPI에서 HTTP 502로 변환됐다.
+이는 로컬 wait_for가 먼저 TimeoutError를 일으킨 것으로 계측되지 않았다.
+13.643초라는 시간만으로 실제 Google 서버 내부 deadline/장애 원인을 확정하지 않는다.
+서버 내부 절대 deadline 및 transport 절대 deadline은 NOT OBSERVABLE이다.
+
+결과의 사전 점검용 scalar actual_final_timeout_seconds에는 NOT TESTED가 남아 있다.
+실제 최종 요청의 timeout은 요청별 SDK/HTTPX/헤더/wait_for에서 **15초**로 확인했다.
+원본 실행 산출물이나 계측 코드를 사후 정정하지 않았다.
+
+### Function Calling, Evidence 및 정상 종료
+
+Gemini가 get_inspection_result(inspection_id=INSP-001406)를 실제 제안했고,
+allowlist와 고정 ID 검증을 거쳐 실제 Python 도구가 성공했다.
+Trace는 라운드 1 / sequence 1 / executed=true / success=true,
+Evidence는 E0001, 도구 실행 시간은 2.570ms였다.
+조사 종료 판정은 **ready=true / policy=NORMAL**이었다.
+추가 조사 요청 없이 두 번째 HTTP 요청이 최종 JSON 단계로 전환됐다.
+T05 ERROR 로그/17개 사실/IMAGE_LOAD_FAILURE 정책은 적용되지 않았다.
+
+Python 도구 계측 2건에는 FastAPI의 사전 결과 조회 1건이 포함된다.
+Agent의 실제 도구 실행은 **1회**이며 Function Calling 중복 실행으로 해석하지 않는다.
+마지막 FunctionResponse는 로컬 조사 이력에 구성됐고, 별도의 후속 조사 ACK를 보내지 않았다.
+최종 요청은 도구·Function Calling 이력을 제외한 독립 user 사실 카탈로그였다.
+실제 전송 경계에서 E0001에 연결된 카탈로그 **20개 항목**을 확인했다.
+이 수치는 생성된 최종 Fact ID 개수가 아니다.
+
+### Ground Truth 입력 경계 및 최종 검증 도달 범위
+
+이번 실행의 공개 HTTP send 경계에 관측만 추가해 원래 요청/응답을 변경하지 않고 확인했다.
+기존 assert_safe의 allowlist·경로·비밀값 검사에 더해 실제 조사/최종 요청의 텍스트에서
+외부 평가 필드·경로·결함 클래스·미탐 설명 등의 금지 marker가 없음을 확인했다.
+최종 카탈로그의 검사 ID와 Evidence ID, 도구 설정 부재를 확인했다.
+전체 요청 본문/헤더/프롬프트 원문이나 인증 값은 저장하지 않았다.
+외부 평가 경로의 open/listdir/scandir를 거부하는 audit guard를 적용했으며,
+평가 파일명 목록/본문/라벨/이미지/마스크를 읽거나 복사하지 않았다.
+확인 범위는 실제 전송 입력과 운영 근거 전달 경계이며 모든 의미 추론의 불가능성을 주장하지 않는다.
+
+| 단계 | 실제 결과 |
+|---|---|
+| 필수 결과 도구 실행 / Evidence Store / 최종 카탈로그 전달 | 성공 / E0001 / 20개 항목 |
+| 최종 JSON 요청 진입 및 전송 | 성공; 이후 HTTP 504 |
+| 최종 보고서 JSON 응답 생성 | 실패 |
+| JSON 파싱 / 단순 스키마 / DiagnosisDraft 변환 | NOT TESTED |
+| Pydantic / 최종 Fact ID·Evidence·JSON Pointer / 권고 근거 검증 | NOT TESTED |
+| 최종 자연어 진단 안전성 검토 | NOT TESTED — 보고서 미생성 |
+
+실제 FastAPI 응답은 detail.analysis_status=FAILED,
+detail.error_code=GEMINI_REQUEST_FAILED였으며 진단 서술문은 없었다.
+따라서 자연어의 결함 단정·무결점 보장 부재를 검토 완료/PASS로 표현하지 않는다.
+최종 Fact ID 수는 미생성/미검증이며 원천 카탈로그 20개를 최종 검증 사실로 보고하지 않는다.
+기존 Mock의 정상 자연어/6개 사실 PASS를 이번 실서버 결과에 대신 적용하지 않았다.
+
+### 판정, 사용량 및 보호
+
+- 전체 Agent E2E 시간: **16.232316초**.
+- 실제 Gemini HTTP **2회** = 조사 **1회** + 최종 JSON **1회**.
+- 실제 Agent 분석 **1회**, FastAPI POST **1회**, SDK 자동/수동 재시도 **0회**.
+  sdk_retry_attempts=1은 최초 시도 1회를 뜻하며 재시도 1회가 아니다.
+- 확인된 사용량은 입력 **1279**, 출력 **28**, Thinking **58**, 전체 **1365토큰**이다.
+  usage_complete=false이며 실패한 최종 요청의 사용량은 UNKNOWN이다.
+  실제 청구 비용도 UNKNOWN이며 확인된 토큰으로 청구 금액을 추정하지 않았다.
+- 실행 후 원본 status/result/final_result/final_reason_code와 점수·기준값을 다시 읽어
+  COMPLETED / OK / OK / ALL_CHECKS_PASSED / 32.26792526245117 / 34.1442 불변을 확인했다.
+  실패 응답에는 최종 보고서 판정이 없으므로 결과의 verdict_unchanged=null은 그대로 보존했다.
+  이는 원본 판정이 바뀌었다는 의미가 아니다.
+- 저장소 write_attempts=0. 사전 보호 파일 **175개 SHA256 모두 동일**했다.
+  운영 JSONL·모델·메타데이터·기존 READY·PASS/FAIL·잠금·코드·테스트·이미지·발표 자료를 보존했다.
+  Ground Truth 내용 해시는 접근 금지에 따라 계산하지 않았다.
+
+새 산출물은 승인 회차의 다음 3개뿐이다.
+
+- data/outputs/manual_validation/t06_operational_groundtruth_isolated_1_analysis_started.lock
+- data/outputs/manual_validation/t06_operational_groundtruth_isolated_1_sanitized_result.json
+- data/outputs/manual_validation/t06_operational_groundtruth_isolated_1_response_review.json
+
+response_review에는 전송 경계의 안전한 항목 수/검사 결과와 실제 API 오류 응답만 저장했다.
+server_natural_text_captured=false로 자연어 보고서를 관측하지 못했음을 명시했다.
+기존 READY는 수정하지 않았지만 잠금과 결과가 생겼으므로 이 회차는 이미 사용됐고 재실행할 수 없다.
+
+### 종료 및 이후 범위
+
+실제 분석 1회 후 실패를 보존하고 중단했다. 다른 회차 생성·추가 분석·재시도·정책 수정은 없었다.
+이번에는 pytest를 반복하지 않았다. 과거 1042 PASS / 4 SKIP / 경고 2건과 준비 테스트 62 PASS는
+이번 실서버 결과가 아니며, 실제 T06 결과는 **FAIL**이다. Git add/commit/push 0건이다.
+
+Google 504 내부 원인은 UNKNOWN이다. 입력 근거 수집과 정상 종료는 성공했지만
+최종 생성 및 자연어/최종 Evidence 검증 성공은 확인하지 못했다.
+이는 PatchCore 미탐의 해결·악화나 Ground Truth 격리 실패를 입증하는 결과가 아니다.
+후속 권고는 별도 승인 후 수집된 최종 요청의 크기/출력 요구/시간 제한에 대한 오프라인 분석이다.
+timeout 변경, 새 회차 준비 및 추가 실제 Gemini 요청은 각각 별도 승인을 받아야 한다.
+
+## T06 최종 JSON HTTP 504 오프라인 분석 및 선택적 30초 최소 변경 설계
+
+**분석 상태 PARTIALLY IDENTIFIED.** 최종 요청 경로·timeout·설정 차단 지점은 확인했다.
+원격 HTTP 504의 내부 원인과 T06 최종 30초의 효과는 여전히 UNKNOWN/NOT TESTED다.
+이번에는 문서만 추가했다. 코드·인프라·테스트·설정·환경 수정 및 신규 회차 생성은 없다.
+
+### A. 관측 경계와 핵심 질문에 대한 답
+
+사용 완료 회차 t06_operational_groundtruth_isolated_1의 sanitized_result와 response_review를 읽었다.
+보고서 실패/잠금/READY 및 실제 전송 경계 기록을 그대로 보존했다.
+
+| 질문 | 코드·Trace에 근거한 답 |
+|---|---|
+| Q1 최종 JSON 단계에 진입했는가 | 그렇다. NORMAL ready=true 이후 service._run이 structured=True로 _generate를 호출했다. |
+| Q2 두 번째가 최종 요청인가 | sdk_requests/http_transmissions sequence=2가 STRUCTURED_OUTPUT이고, 별도 전송 관측에서도 JSON 모드·독립 카탈로그·tools 부재를 확인했다. |
+| Q3 실제 timeout은 15초인가 | SDK 15000ms, HTTPX connect/read/write/pool 각 15초, X-Server-Timeout=15, local wait_for=15가 일치했다. |
+| Q4 어떤 예외인가 | 원격 HTTP 504 / DEADLINE_EXCEEDED → SDK ServerError → GEMINI_REQUEST_FAILED → FastAPI HTTP 502 / FAILED. |
+| Q5 로컬 timeout과 구별되는가 | 이번에는 실제 HTTP 상태 504와 ServerError가 수집됐다. 로컬 wait_for TimeoutError라면 _generate는 GEMINI_TIMEOUT으로 처리한다. |
+| Q6 15초가 직접 원인인가 | 입증되지 않았다. 서버로 15초 헤더가 전달됐다는 사실과 인과관계 확정은 다르다. |
+| Q7 과거 성공과의 관계 | T03/T05는 같은 모델/SDK와 선택적 30초 최종 요청 성공 기록이 있으나 입력·시점·생성량이 다른 별도 실험이다. |
+| Q8 무엇을 바꿔야 하는가 | T06 READY profile의 final_timeout=15 제한과 T06 wrapper의 selected=15/prepare=15/보고 상한=15 고정을 최소 확장해야 한다. |
+| Q9 특정 회차만 30초인가 | 설계상 가능하다. 기존 AgentService는 최종 요청별 독립 timeout을 이미 지원한다. 아직 T06 인프라에는 구현하지 않았다. |
+| Q10 60초/2초와 충돌하는가 | 기존 min(승인 상한, floor(잔여 예산-2))를 유지하면 상한만 30초로 선택 가능하다. 잔여 예산 부족은 기존 정책대로 축소/요청 전 차단한다. |
+| Q11 기존 실패와 분리 가능한가 | 새 ID의 exclusive READY/잠금/결과 규칙을 재사용할 수 있다. 기존 회차 재실행은 금지다. |
+| Q12 GT·판정·최종 검증 유지 가능한가 | timeout 선택은 운영 데이터·NORMAL 종료·카탈로그·최종 validator와 별개다. 변경하지 않는 설계이며 새 profile의 실제 검증은 후속 과제다. |
+| Q13 별도 원인이 입증됐는가 | 프롬프트/카탈로그/응답 크기나 스키마가 504를 유발했다는 증거는 없다. 아래 관측 한계를 유지한다. |
+| Q14 성공 가능성을 말할 수 있는가 | 프로토콜 재사용 가능성은 있으나 T06 재검증 성공 여부/성공률은 말할 수 없다. 30초에서도 504나 최종 검증 실패가 가능하다. |
+
+관련 코드: backend/agent/service.py:269(_request_timeout_seconds), :285(_generate), :346(_run).
+최종 응답 생성 실패이므로 JSON/DiagnosisDraft/Pydantic/최종 Fact·Evidence·Pointer/자연어 안전성은
+모두 NOT TESTED다. 전달된 카탈로그 20개를 최종 사실 20개 검증 성공으로 해석하지 않는다.
+
+### B. 원격 HTTP 504와 로컬 시간 제한
+
+실제 HTTP 경과 시간은 조사 2.414212초, 최종 13.642747초였고 전체 16.232316초였다.
+최종 SDK wrapper는 13.644746초다. 13.643초는 로컬 15초 초과를 의미하지 않는다.
+HTTPX의 각 phase timeout은 전송 전체의 단일 절대 deadline과도 다르며,
+wait_for가 모델 coroutine의 로컬 요청 한도를 별도로 감싼다.
+
+설치 SDK _api_client.py:1541 부근은 ms를 초로 변환하고 서버 timeout 헤더를 구성한 뒤
+HttpRequest.timeout에 넣는다. :1711 부근의 HTTPX 경로는 이 값을 build_request에 전달하고
+응답을 errors.APIError.raise_for_async_response로 검사한다.
+errors.py는 5xx를 ServerError로 분류한다. 수동 runner는 aiohttp를 사용하지 않는 HTTPX 경로다.
+기존 X-Server-Timeout이 있으면 SDK의 populate_server_timeout_header는 덮어쓰지 않지만,
+운영 _generate는 매 요청의 계산값으로 헤더를 명시해 stale 15초 문제를 방지한다.
+
+원격 서버 처리 지연, 서버 deadline 정책, 중간 프록시의 기한 처리,
+JSON 생성/Thinking 부하는 모두 **HYPOTHESIS**이며 내부 로그로 확인되지 않았다.
+확인한 것은 Google API endpoint로 보낸 요청에서 HTTP 504를 받았다는 경계까지다.
+서버 내부 절대 deadline과 transport 절대 deadline은 NOT OBSERVABLE이다.
+SDK/HTTPX/헤더/wait_for 설정 일치만으로 서버 내부 원인을 확정하지 않는다.
+
+### C. T03/T05 실제 성공 기록과 비교
+
+세 회차의 기존 JSON 산출물에서 시간·단계·상태를 재확인했다. 아래는 과거 실제 실행 결과다.
+
+| 항목 | T03 | T05 | T06 |
+|---|---|---|---|
+| 운영 시나리오 | 품질 경고 REINSPECT | 이미지 로딩 실패 ERROR | 저장 OK |
+| 최근 실제 결과 | PASS / HTTP 200 | PASS / HTTP 200 | FAIL / HTTP 502 |
+| 조사 timeout | 15초 | 15초 | 15초 |
+| 최종 SDK/HTTPX/헤더/wait_for | 30초 | 30초 | 15초 |
+| 최종 HTTP / 소요 | 200 / 18.967153초 | 200 / 11.062972초 | 504 / 13.642747초 |
+| 전체 E2E | 24.600289초 | 16.332551초 | 16.232316초 |
+| 전체 / 여유 / 재시도 | 60초 / 2초 / 0회 | 동일 | 동일 |
+| 실행기 계약 | T03 wrapper에서 최종 30초 요구 | 기본 15초, 준비 CLI로 30초 선택, READY·환경·Settings 비교 | 현재 15초만 허용 |
+| READY 계약 | 공통 schema_version=1, 15/30 중 명시된 상한; 기존 T03 경로는 30초 사용 | 같은 구조, 15·30초 이력 분리 | 같은 구조, 고정 검사 ID·T06 ID 패턴·final_ceiling=15 |
+
+T03의 18.967초 성공은 더 긴 요청을 수행할 수 있었던 사례이지 T06 인과관계의 대조 실험은 아니다.
+T05는 15초보다 짧게 완료되어 30초가 반드시 필요했다는 증거도 아니다.
+T06의 30초 실제 효과는 여전히 NOT TESTED다.
+
+### D. 현재 T06 제한 및 크기 분석의 한계
+
+- scripts/agent_validation_measurements.py:244의 ready_manifest는 T06에서 검사 ID를
+  INSP-001406으로 고정하고 final_timeout != 15를 거부한다. 회차 패턴은
+  t06_operational_..._양의정수이며 새 final30 후보도 이름 자체는 이 패턴에 맞는다.
+  현재 그 이름에 30초를 지정하면 거부되고, 이름에 final30이 있다는 이유로 30초가 허용되지 않는다.
+- run_t06_simple_e2e_once.py:23은 Settings/환경 일치 후 selected != 15를 거부하며,
+  준비 plan, :49의 prepare, 준비 결과 상한에도 15가 고정돼 있다.
+  환경변수만 30으로 바꾸는 방식은 현재 안전하게 BLOCKED된다.
+- backend/config.py:38과 AgentLimits는 이미 최종 기본 15초/최대 30초를 지원한다.
+  운영 서비스는 조사 15초와 최종 상한을 분리하므로 backend 수정은 필요하지 않다.
+
+실제 전송 기록에는 카탈로그 20개와 E0001, tools 부재, 평가 marker 검사 결과가 있지만
+최종 요청 전체 snapshot/SDK 직렬화 byte 수/최종 입력·Thinking 토큰은 저장되어 있지 않다.
+따라서 현재 코드로 만들 수 있는 요청을 당시 실제 byte-for-byte 요청으로 단정하지 않는다.
+현행 최종 스키마는 다섯 필드 토큰 보고서이며 max_output_tokens 기본은 4096이다.
+service._generate는 Thinking 설정을 명시하지 않으므로 모델의 실제 최종 Thinking 예산은 알 수 없다.
+로컬 payload 검사와 직렬화는 전송까지 진행됐고 CONTEXT_TOO_LARGE나 HTTP 400은 관측되지 않았다.
+하지만 이것이 서버 부하나 스키마 처리 비용을 배제하는 증거는 아니다.
+명백한 중복/크기/스키마 위반을 별도의 504 원인으로 확정할 자료는 없다.
+
+### E. 추천 최소 설계 — 명시적 신규 회차의 최종 30초만 허용
+
+**아래는 설계이며 구현/승인 회차 생성/환경 변경을 수행하지 않았다.**
+
+1. 공통 계측 helper에 작은 T06 회차-profile 판정 함수를 두고 READY와 wrapper가 함께 사용한다.
+   30초 profile은 후보 t06_operational_groundtruth_isolated_final30_1에 명시적으로 바인딩하고,
+   기존 T06 일반/기본 회차는 15초 규칙을 유지한다. 단순히 이름에 30이 들어간다고 허용하지 않는다.
+   검사 ID 고정은 그대로다. 지원하지 않는 ID/profile 조합은 fail-closed다.
+2. 기존 schema_version=1과 timeouts_seconds.final_ceiling을 재사용한다.
+   새 metadata 필드를 기존 READY에 주입하거나 과거 문서를 재작성하지 않는다.
+   선택 profile과 명시한 final_timeout이 일치해야 하며, T06 준비 호출은 그 값을 명시하도록 한다.
+   공통 helper의 T03 기본 인자(30초)가 T06의 묵시적 opt-in이 되지 않도록 검증한다.
+3. T06 prepare의 기본값은 15초로 유지한다. T05와 같은 준비 전용
+   --prepare-final-timeout {15,30} 옵션을 후보로 추가하되 실행/오프라인 모드에서는 override를 금지한다.
+   30초 후보 준비에는 정확한 새 ID + 명시적 준비 옵션 30 + 자식 프로세스 환경 30 + Settings 30이
+   모두 필요하다. 이름 또는 환경변수 하나만으로 기존 기본 회차를 30초로 승격하지 않는다.
+4. 실행 모드에서는 READY 검증 결과를 상한의 근거로 사용한다.
+   validate_attempt_timeout(..., scenario=T06)가 READY/환경/Settings/profile을 함께 확인하게 한다.
+   T06 wrapper의 selected=15 및 보고 상한=15 고정을 profile 기반 값으로 대체한다.
+   준비는 plan→원본 정상 판정·격리 점검→exclusive create,
+   실행은 READY 재검증→exclusive 잠금→분석 최대 1회→exclusive 결과 기록 순서를 유지한다.
+5. 실제 선택은 향후 승인된 자식 프로세스의 AGENT_FINAL_MODEL_TIMEOUT_SECONDS=30만 사용한다.
+   .env/시스템 환경/기본 Settings/공통 클라이언트의 조사 15초를 바꾸지 않는다.
+   기존 GenerateContentConfig.http_options.timeout, 명시적 X-Server-Timeout,
+   HTTPX 및 wait_for의 동일 계산값 전파를 그대로 재사용한다.
+
+필수 인프라 변경 예상 파일은 다음 **2개**다.
+
+- scripts/agent_validation_measurements.py — T06 profile 한곳 정의 및 READY 계약 연결.
+- data/outputs/manual_validation/run_t06_simple_e2e_once.py — 준비 옵션과 profile/READY 기반 상한 검증.
+
+backend/config/service, T01/T03/T05 runner, 도구/프롬프트/스키마 변경은 필요하지 않다는 설계다.
+테스트 변경의 중심은 tests/test_agent_t06_infrastructure.py이며 격리 테스트의 기존 기본 15초 검증은 유지한다.
+최종 자연어 검토는 기존 response_review 관측 방식을 재사용해야 한다.
+stale scalar actual_final_timeout_seconds=NOT TESTED를 실제 timeout 증거로 사용하지 않으며,
+그 필드 정정은 필수 timeout 변경과 분리 가능한 별도 계측 개선이다.
+
+### F. 오류 코드 및 전체 예산 계약
+
+- 지원하지 않는 회차/검사 ID/요청 profile 조합은 INVALID_ATTEMPT_SETTINGS.
+- 유효한 caller profile에서 READY의 scenario/ID/state 등 메타데이터 불일치는 INVALID_READY_MANIFEST.
+- 환경 문법, Settings 불일치, READY 승인 상한과 프로세스 상한 불일치는 기존
+  INVALID_PROCESS_TIMEOUT / INVALID_ATTEMPT_TIMEOUT / PROCESS_SETTINGS_TIMEOUT_MISMATCH /
+  ATTEMPT_PROCESS_TIMEOUT_MISMATCH 분류를 유지한다. 모두 한 코드로 변환하지 않는다.
+- 공통 validator의 세부 분류와 T06 wrapper의 외부 T06_PREFLIGHT_BLOCKED 표시는 구분한다.
+  이전 오류 코드 정합화 테스트의 유효 caller/변조 READY 경계를 그대로 유지해야 한다.
+- 사용 완료 회차의 잠금/결과는 ATTEMPT_ALREADY_USED로 차단하고 새 ID만 준비한다.
+
+기존 최종 timeout 계산은 min(final_model_timeout_seconds, floor(remaining_agent_budget-2))다.
+최종 진입 당시 T06 잔여 예산 약 57.546초에 같은 규칙을 가정하면
+선택 상한 30초는 30초로 허용될 수 있다. 이는 당시 요청을 다시 실행하거나 개선 시간을 측정한 결과가 아니다.
+잔여 18초이면 최대 16초로 축소하고, floor(잔여-2)<1이면 전송 전에 AGENT_TIMEOUT으로 차단한다.
+전체 60초, 조사 15초, 도구/라운드/반복 한도와 재시도 금지는 그대로다.
+여유 2초가 모든 후처리 완료를 보장한다는 뜻은 아니며 전체 deadline도 계속 적용한다.
+
+### G. 기존 테스트 재사용과 신규 검증 계획
+
+이번에는 테스트 정의/Mock fixture만 읽었고 테스트를 작성·수정·실행하지 않았다.
+아래의 “재사용 가능”은 기존 검증 구조가 있다는 뜻이며 이번 실행의 PASS가 아니다.
+
+| 검증 항목 | 기존 재사용 근거 | 후속 신규/보강 필요 |
+|---|---|---|
+| T06 기본 15/15, ID·회차·충돌·사용 후 차단 | test_agent_t06_infrastructure.py의 기본/음성/전체 runner Mock | 기존 assertion 유지 |
+| 선택적 T06 15/30 profile | test_agent_operating_timeouts.py는 서비스 수준 T06의 15·30을 이미 파라미터화 | 실제 T06 wrapper/READY/profile의 양성·음성 추가 필수 |
+| 환경·Settings·READY 일치 | test_agent_t05_timeout_configuration.py의 15/30 및 기존 회차 보호 | T06 후보 30과 기존 15를 서로 바꿔 사용하는 모든 조합 차단 |
+| SDK/HTTPX/헤더/wait_for 및 stale 헤더 | test_agent_timeout_measurements.py, operating_timeouts의 MockTransport | T06 후보 READY에서 계산된 15→30 및 별도 후속 조사 15 전파 연결 |
+| 남은 예산 축소/요청 전 차단 | operating_timeouts의 잔여 예산·fake deadline 테스트 | T06 30 profile에 동일 assertion 연결 |
+| NORMAL 종료·카탈로그·최종 엄격 검증·GT 격리 | test_agent_t06_isolation.py 및 T06 runner Mock | 새 profile에서도 실제 저장 OK 입력의 1조사+1최종·판정/문구 계약 확인 |
+| T01/T03/T05 회귀 | 공통 계측/ERROR/경고/timeout 모듈 | 기존 15→30→15, ERROR 17개 사실, 기존 15초 기본 경로 유지 |
+
+후속 조사 15초 확인은 설정 누출 여부를 보는 별도 SDK Mock이다.
+정상 T06 E2E에 세 번째 실제 조사 요청을 추가하라는 뜻이 아니다.
+새 profile의 30초 허용·다른 회차 30초 거부·옵션 누락/환경 불일치·조사/최종 504 처리·
+자연어 응답 보존 및 검토 불가 시 NOT TESTED/REVIEW_REQUIRED 분리를 테스트해야 한다.
+tests/test_agent_t05_timeout_configuration.py의 fixture를 재사용하되 ERROR 정책을 T06에 복사하지 않는다.
+실제 성능/비용 개선이나 서버 504 해결은 Mock으로 검증할 수 없다.
+
+### H. 대안 비교
+
+| 대안 | 변경 범위·장점 | 영향·위험·검증 | 추천 |
+|---|---|---|---|
+| A 신규 승인 T06 회차만 최종 30초 | 위 인프라 2파일+관련 테스트, backend 기본 불변 | 별도 ID/환경/READY 계약 필요. 최종 대기 상한은 커지지만 실제 지연 증가량·Thinking/비용은 미확정. 504·검증 실패 가능 | **후속 최소 구현 후보로 추천**, 이번에는 설계만 |
+| B 모든 T06 기본을 30초 | T06 helper/runner의 전역 규칙 및 기본 테스트 변경 | 과거/기본 15초 계약과 의미 충돌, 영향 범위·지연 위험 확대. 그래도 성공 보장 없음 | 비추천 |
+| C 현 상태 유지·추가 오프라인 관측 | 코드/설정 변경 없음, 불확실성·안전 경계 보존 | T06 최종 성공은 계속 미검증. 로그만으로 서버 내부 원인을 확인할 수 없을 수 있음 | A 구현 승인 전의 안전한 현재 상태 |
+
+30초는 검증 후보이지 권장 정답/성공 보장이 아니다. A도 실제 요청 수를 늘리거나
+자동 재시도하는 설계가 아니며, 실패 요청의 비용 UNKNOWN 문제도 그대로 남을 수 있다.
+
+### I. 신규 회차 후보·보호·다음 승인
+
+후보 t06_operational_groundtruth_isolated_final30_1에 대해 수동 검증 경로를 재귀 검색했다.
+동일 접두어의 READY/잠금/결과/기타 산출물은 **현재 없음**이다.
+이 사실은 이름 예약이나 READY 생성이 아니며 향후 준비 직전에 충돌을 다시 검사해야 한다.
+기존 t06_operational_groundtruth_isolated_1은 잠금·FAIL 결과를 보존한 사용 완료 회차다.
+
+보호 파일 **178개 SHA256 모두 동일**, 추가 산출물 0개다. 운영 JSONL·모델/임계값 메타데이터,
+기존 실서버 회차/READY/잠금·원본 확인 이미지·backend/검증 코드/테스트·발표 자료를 보존했다.
+문서만 추가했으며 외부 Ground Truth 경로/본문/라벨/마스크에 접근하지 않았다.
+프로세스 환경이나 운영 설정도 바꾸지 않았다. git diff --check는 공백 오류 없이 통과했다.
+실제 Gemini API 요청 **0회**, 실제 분석 **0회**, 새 READY·잠금·실제 결과 **0건**,
+Git add/commit/push **0건**이다.
+
+기존 1042 PASS / 4 SKIP / 경고 2건 및 관련 62 PASS는 과거 결과이며 이번 테스트 결과가 아니다.
+다음 승인은 (1) 위 최소 인프라 변경과 오프라인 회귀, (2) 통과 후 독립 신규 30초 READY 준비,
+(3) 그 이후 정확히 1회 실제 T06 검증으로 분리해야 한다. 이번에는 어느 단계도 실행하지 않고 중단한다.
+
+## T06 지정 회차 최종 JSON 30초 구현 및 전체 오프라인 회귀 (2026-10-17)
+
+### A. 목적과 승인 범위
+
+이번 결과는 **검증 인프라 구현 및 오프라인 PASS**다. 실제 T06 Gemini E2E 성공이 아니다.
+기존 t06_operational_groundtruth_isolated_1의 최종 JSON HTTP 504 / FAIL 기록은 그대로 보존했다.
+Google 서버 내부 원인은 여전히 UNKNOWN이며, 15초 제한이 직접 원인이라고 확정하지 않는다.
+
+신규 후보 t06_operational_groundtruth_isolated_final30_1 / INSP-001406에만
+T06_FINAL_JSON_30S에 해당하는 계약을 허용한다. 별도 JSON Schema나 profile 필드를 추가하지 않고
+정확한 회차 ID와 기존 timeouts_seconds.final_ceiling으로 식별한다.
+조사 15초 / 최종 JSON 30초 / 전체 60초 / 여유 2초 / 자동·수동 재시도 0회다.
+이번에는 해당 후보의 READY·잠금·실제 결과를 생성하지 않았다.
+
+### B. 최소 변경 및 기본 정책 보존
+
+- scripts/agent_validation_measurements.py: t06_final_timeout은 기존 T06 ID 형식을 검증하고,
+  지정된 정확한 후보 ID에만 30, 나머지 유효 T06 ID에는 15를 반환한다.
+  READY 생성 시 T06 최종 상한을 명시해야 하며 지정 후보에 15를 전달하거나 다른 회차에 30을 전달하면 차단한다.
+  T03/T05의 기존 기본 상한과 선택적 15/30 계약은 유지했다. 생략된 인자와 명시적 None을
+  sentinel로 구분하여 기존의 비정상 timeout 타입 거부도 보존한다.
+- validate_attempt_timeout은 T06의 승인 상한을 저장된 READY에서 신뢰하지 않고 회차 정책에서 구한다.
+  유효 caller의 scenario/ID/state/상한/다른 회차 메타데이터 변조는 INVALID_READY_MANIFEST,
+  지원하지 않는 caller의 scenario/ID/회차/상한 조합은 INVALID_ATTEMPT_SETTINGS로 구분한다.
+  환경·Settings·READY와 프로세스 간 불일치는 기존 세부 오류 코드를 유지한다.
+- data/outputs/manual_validation/run_t06_simple_e2e_once.py: prepare의 기본값은 계속 15다.
+  --prepare-final-timeout 30은 --prepare-only에서만 허용한다. 실행/offline 모드에서 이 옵션으로
+  READY 설정을 덮어쓰려 하면 인자 파싱 단계에서 차단한다.
+  Settings, 프로세스 환경, 승인 회차, READY 상한의 일치를 확인한 후 기존 정상 preflight를 재사용한다.
+  준비 검사만 통과한 상태에서는 actual_final_timeout_seconds 및 최종 검증은 NOT TESTED다.
+  실행 모드의 상한은 승인된 READY에서 가져오며 전역 환경이나 Settings 기본값을 변경하지 않는다.
+- 직접 관련 테스트 3개만 보강했다: test_agent_t06_infrastructure.py,
+  test_agent_t06_isolation.py, test_agent_t05_timeout_configuration.py.
+  backend, 기존 T01/T03/T05 실행기, 프롬프트, Schema와 ERROR 17개 정책은 수정하지 않았다.
+
+### C. Mock 검증 근거와 안전 경계
+
+실제 google-genai SDK를 HTTPX MockTransport에 연결하여 신규 T06 READY 상한에서 계산된
+SDK 15000→30000→15000ms / HTTPX 15→30→15초 / X-Server-Timeout 15→30→15 /
+로컬 wait_for 15→30→15초를 확인했다. 마지막 15초 요청은 설정 누출 검사용 독립 SDK Mock이며
+정상 T06 분석에 불필요한 추가 조사를 넣은 것이 아니다. 별도 환경 컨텍스트 종료 후 Settings 기본 15도 확인했다.
+자식 실행 환경에 해당하는 환경값·Settings·READY의 불일치는 전송 전에 차단한다.
+runner는 프로세스 환경을 직접 바꾸지 않으며 향후 실행 시에만 격리된 자식 프로세스에 30을 전달해야 한다.
+
+운영 Agent의 min(승인 상한, floor(잔여 전체 예산 - 2))는 변경하지 않았다.
+기존 operating_timeouts 테스트의 잔여 18→16초, 14.9→12초 축소 및 예산 부족 시 전송 전 차단도 PASS다.
+SDK retry attempts=1은 최초 시도만을 뜻하며 자동 재시도는 없다. 전체 60초도 유지된다.
+
+T06 기본 15/15 및 신규 15/30 runner Mock 모두 조사 1회 + 최종 JSON 1회로 완료됐다.
+실제 Python get_inspection_result 실행, NORMAL 종료, E0001, 핵심 사실 6개, JSON 변환,
+Pydantic·Evidence/Pointer 검증 및 원본 OK 판정 보존을 확인했다. T05 전용 17개 조건은 적용하지 않는다.
+조사 504 및 최종 JSON 504 Mock은 FAIL을 유지하고 재시도하지 않는다.
+기존 소비된 T06 ID 및 신규 ID의 잠금/결과 충돌과 같은 회차 두 번째 실행은 차단된다.
+이러한 준비·실행 산출물은 모두 외부 임시 테스트 경로에만 생성했다.
+
+실제 저장 T06의 COMPLETED / OK / OK / ALL_CHECKS_PASSED,
+anomaly_score=32.26792526245117, decision_threshold=34.1442를 읽기 전용으로 재확인했다.
+격리 테스트를 15/30 양쪽으로 실행하여 네 도구, Evidence, Fact Catalog, 실제 Mock 전송 입력과 변환 입력의
+평가 필드 비노출, 무근거 정답 주장·무결점 보장·판정 변경·없는 토큰 거부를 확인했다.
+외부 evaluation_private 경로는 열거나 목록·해시를 조회하지 않았다.
+이는 확인한 전달 경계와 기존 제한된 보고서 계약에 대한 검증이며 OS 수준의 완전 격리나
+모든 자유 서술 표현의 안전성을 보장한다는 뜻은 아니다.
+
+### D. 이번 실제 오프라인 실행 결과
+
+Miniconda vision-insight Python을 사용하고 OUTPUT_DIR/LOG_DIR/TEST_DATA_DIR 및 두 JSONL 경로를
+외부 tempfile 경로로 분리했다. 기본 HTTPTransport/AsyncHTTPTransport를 차단하고 MockTransport만 허용했다.
+evaluation_private 파일 open 차단 guard와 PYTHONDONTWRITEBYTECODE=1도 적용했다.
+pytest.main에 -q -rs -p no:cacheprovider --basetemp <외부 임시 경로>를 전달했다.
+
+| 실행 범위 | 이번 결과 |
+|---|---|
+| 프로필 우선 테스트 (최초 구현 시 final30 또는 selected_manifest 선택) | 39 PASS |
+| 최종 관련 5개 모듈: T06 인프라·격리, T05 timeout 설정, timeout 계측, 운영 timeout | 206 PASS |
+| tests/test_agent_*.py 전체 | 988 PASS |
+| tests 전체, 최대 1회 실행 | **1089 PASS / 0 FAIL / 4 SKIP / 경고 2건**, 28.30초 |
+| python -m pip check | No broken requirements found |
+| git diff --check | 공백 오류 없음 (기존 LF/CRLF 알림은 pytest 경고와 별개) |
+
+기존 1042 PASS 기준 대비 테스트 case는 **47개 증가**했다:
+T06 인프라 39개, T06 격리 7개, SDK 15→30→15 전파 1개 추가/파라미터 확장이다.
+범위별 실행은 중복되므로 PASS 수를 합산하지 않는다.
+전체 실행 후 최종 검토에서 생략 인자와 명시적 None의 구분을 보강하고 기존 음성 테스트에 assertion을 추가했다.
+그 최종 변경 후 관련 5개 모듈 **206 PASS**를 다시 확인했다. 위 전체 pytest 1089 PASS는
+이 타입 호환성 보강 전의 1회 실행 결과이며, 최대 1회 제한에 따라 전체 pytest는 추가 실행하지 않았다.
+4 SKIP은 격리 환경의 선택적 T03 주입 이미지 미등록으로 기존 테스트가 건너뛴 것이며 새 skip/xfail은 없다.
+경고 2건은 기존 timm.layers 및 anomalib dinov2 deprecation이다.
+기존 T03 독립 이미지 fixture와 데이터 격리 검증은 변경 없이 통과했다.
+
+### E. 보호 및 중단 상태
+
+사전·사후 SHA256 대조 **178개 중 허용된 구현/테스트 5개만 변경**, 나머지 **173개 동일**, 추가 파일 0개다.
+대조에는 backend·기타 테스트, 운영 JSONL, PatchCore 체크포인트·임계값 메타데이터,
+기존 READY/잠금/PASS·FAIL 회차, 확인 원본 이미지, 발표 자료·데모가 포함된다.
+문서는 기존 이력을 보존하고 이 섹션만 추가했다. 기존 사용자 변경 파일
+test_data_isolation_and_security.py 및 .tmp_measurement_regressions는 수정·복원하지 않았다.
+지정 후보 접두어의 실제 검증 산출물은 현재 없다.
+
+실제 Gemini 분석 **0회 / API 요청 0회**, 신규 실제 READY·실행 잠금·분석 결과 **0건**,
+Git add/commit/push **0건**이다. 기존 T06 실제 E2E 상태는 계속 FAIL이며 30초 효과는 NOT TESTED다.
+서버 504 재발, 최종 JSON 및 자연어/근거 검증 실패 가능성은 남아 있고 성공률·비용을 추정하지 않는다.
+다음은 별도 사용자 승인 후 (1) 충돌·보호·설정을 재확인하여 신규 READY 정확히 1개 준비,
+(2) 다시 별도 승인 후 해당 회차 실제 분석 정확히 1회 순서다. 이번 작업은 여기서 중단한다.
+
+## T06 선택적 최종 JSON 30초 READY 준비 사전 점검 차단 (2026-10-17)
+
+### A. 대상 및 사전 확인
+
+최종 상태는 **BLOCKED / READY 미생성**이다. 실제 Gemini E2E 실행 결과가 아니다.
+대상은 t06_operational_groundtruth_isolated_final30_1 / INSP-001406으로 고정했다.
+기존 t06_operational_groundtruth_isolated_1의 READY·사용 완료 잠금·FAIL 결과·검토 기록을 보존했다.
+기존 결과의 FastAPI 502 / analysis_status=FAILED / 실제 분석 1회 / 자동 재시도 없음도 읽기 전용으로 확인했다.
+신규 후보 접두어의 READY·잠금·결과·기타 산출물은 준비 전 재귀 검색에서 0개였다.
+
+운영 JSONL의 해당 검사 1건을 확인했으며 다음 값은 모두 일치했다:
+COMPLETED / OK / OK / ALL_CHECKS_PASSED,
+anomaly_score=32.26792526245117, decision_threshold=34.1442.
+외부 평가 데이터의 본문·목록·정답·마스크·해시는 조회하지 않았다.
+
+### B. 이번 오프라인 테스트와 준비 계약
+
+기존 테스트 5개 모듈을 외부 임시 출력 경로와 HTTPTransport/AsyncHTTPTransport 차단 아래 실행했다:
+test_agent_t06_infrastructure.py, test_agent_t06_isolation.py,
+test_agent_t05_timeout_configuration.py, test_agent_timeout_measurements.py,
+test_agent_operating_timeouts.py. 이번 결과는 **206 PASS**, 7.47초다.
+전체 pytest는 이번에 실행하지 않았다. 과거 1089 PASS / 4 SKIP / 경고 2건을 이번 결과로 계산하지 않는다.
+
+지정 후보에만 조사 15 / 최종 30을 허용하고, 다른 T06 기본 15/15 및 T03/T05 계약을 유지한다.
+READY 변조와 실행 설정 불일치의 INVALID_READY_MANIFEST / INVALID_ATTEMPT_SETTINGS 분류,
+검사 ID·회차 혼용 차단, 소비된 회차 재사용 차단, 생략 인자와 명시적 None의 타입 호환성도 통과했다.
+SDK·HTTPX·서버 헤더·wait_for의 15→30→15, 전체 60초, 여유 2초,
+min(승인 상한, floor(잔여 예산-2)) 축소와 재시도 금지를 Mock으로 확인했다.
+NORMAL 조사 1회 + 최종 JSON 1회, Pydantic·Evidence/Pointer·판정 불변 및 평가 정보 비노출 Mock도 통과했다.
+이 결과는 실제 Gemini 최종 생성 성공이나 OS 수준의 완전한 데이터 격리 보장이 아니다.
+
+### C. 준비 사전 점검 중단 경계
+
+기존 공식 T06 module의 준비 경로를 사용하기 위해 별도의 임시 Python 래퍼를 실행했다.
+최종 timeout 30은 그 자식 프로세스 환경에만 지정했다.
+SDK Client 생성, AgentService.analyze, HTTPX 기본 전송 및 실제 실행 진입점은 금지하도록 구성했다.
+추가로 모든 socket.connect / socket.getaddrinfo를 막는 감사 훅도 설치했다.
+공식 offline_preflight(require_ready=False, final_timeout=30) 단계에서 RuntimeError로 중단됐으며
+--prepare-only --prepare-final-timeout 30의 파일 생성 단계에는 도달하지 못했다.
+출력은 status=BLOCKED, exception_type=RuntimeError, ready_exists=false, no_retry=true였다.
+불완전하게 초기화된 ProactorEventLoop 정리 과정에서 _ssock 속성 부재 예외도 관측됐다.
+
+읽기 전용 표준 라이브러리 확인 결과 Windows asyncio의 _make_self_pipe는 socket.socketpair를 사용하며,
+socket.py의 fallback 구현은 내부 연결을 위해 connect를 사용한다.
+추가 감사 훅이 이 내부 소켓 초기화까지 막았다는 것이 현재의 유력한 **HYPOTHESIS**다.
+차단 당시 감사 이벤트·내부 예외 원문은 출력하지 않아 직접 인과를 확정할 상세 Trace는 없다.
+이는 운영 Agent timeout 또는 원격 Gemini HTTP 504 원인이 확인됐다는 뜻이 아니다.
+
+사용자 지시대로 사전 점검 실패 후 래퍼를 바꿔 재시도하지 않았다.
+READY를 직접 작성하거나 다른 회차를 선택하지 않았으며 운영 코드·실행기·테스트도 변경하지 않았다.
+따라서 생성 후 공식 READY 재검증은 **NOT TESTED**다.
+예정 경로 data/outputs/manual_validation/t06_operational_groundtruth_isolated_final30_1_ready.json은 현재 존재하지 않는다.
+
+### D. 보호 및 다음 승인
+
+기존 대조 파일 **178개 SHA256 모두 동일**, 신규 산출물 **0개**를 확인했다.
+운영 JSONL·모델/임계값·기존 READY/잠금/PASS·FAIL 결과·확인 원본 이미지·발표 자료/데모 및
+기존 backend/검증 코드/테스트를 보존했다. 이번 변경은 이 문서의 섹션 추가뿐이다.
+git diff --check는 공백 오류 없이 통과했다. 기존 사용자 변경은 복원하거나 덮어쓰지 않았다.
+
+실제 Gemini API 요청 **0회**, 실제 Agent 분석 **0회**, 신규 READY **0개**,
+신규 실행 잠금·실제 E2E 결과 **0건**, Git add/commit/push **0건**이다.
+T06 실제 E2E 상태는 기존 FAIL이며 선택적 30초의 실제 효과는 여전히 NOT TESTED다.
+다음에는 별도 승인 후 Windows 내부 socketpair와 호환되는 임시 안전 래퍼로 준비 사전 점검부터 다시 확인해야 한다.
+HTTPX/SDK/분석 실행 차단은 계속 유지해야 하며, READY 준비와 실제 E2E 단일 실행 승인은 분리한다.
+이번에는 추가 준비 시도 없이 중단한다.
+
+## Windows asyncio 호환 비호출 검증 및 T06 선택적 30초 READY 생성 (2026-10-17)
+
+### A. 이전 RuntimeError의 오프라인 재현
+
+이전 준비 시도의 전체 내부 Traceback은 저장되지 않았으므로, 당시 임시 감사 훅을 별도의
+비네트워크 재현 프로세스에서 asyncio.new_event_loop에만 적용했다. Gemini SDK는 import하지 않았다.
+실제 재현 예외는 **RuntimeError: NETWORK_FORBIDDEN**, 차단 이벤트는
+socket.connect / host=127.0.0.1이었다. 확인된 Traceback 호출 순서는 다음과 같다.
+
+new_event_loop → Windows ProactorEventLoop.__init__ → _make_self_pipe
+(asyncio/proactor_events.py:784) → socket._fallback_socketpair (socket.py:621) → old_guard.
+
+따라서 모든 socket.connect를 금지했던 래퍼가 Windows asyncio 내부 socketpair 초기화를
+막는 원인은 이번 오프라인 재현에서 확인했다. 기존 _ssock 부재 정리 예외와도 일치한다.
+이는 원래 예외 원문이 복원됐다는 뜻이 아니며, Google HTTP 504의 서버 내부 원인과 무관하다.
+기존 T06 504 원인은 계속 UNKNOWN이다. 운영 READY 생성기 결함이나 timeout 결함으로 판정하지 않는다.
+
+### B. 임시 안전장치 및 Windows 호환 확인
+
+영구 파일이나 운영 코드 변경 없이 자식 Python 프로세스의 임시 래퍼만 사용했다.
+SDK Client 생성, 동기/비동기 SDK request, 동기/비동기 generate_content,
+AgentService.analyze, 동기/비동기 HTTPX 기본 전송을 차단했다.
+8개 경계에 대한 음성 대조는 각각 차단 예외를 확인했으며 실제 SDK/HTTP 본문은 실행하지 않았다.
+HTTP 음성 대조는 패치된 transport에서 중단되어 DNS/외부 연결로 진행하지 않았다.
+이 대조 호출 수와 실제 준비 경로 호출 수는 분리해 계측했다.
+
+소켓 생성 자체는 금지하지 않았다. 숫자 loopback/localhost 내부 연결만 허용하고 외부 connect/DNS는 감사 훅으로 차단했다.
+준비 프로세스가 패치되지 않은 자식으로 작업을 넘길 수 없도록 프로세스 실행도 차단했다.
+초기 안전장치 검토 중 SDK import의 platform.system → cmd ver 보조 조회까지 RuntimeError로 차단되는
+추가 호환성 문제가 발견됐다. 임시 프로세스 차단을 OSError로 표현하여 표준 platform의
+기존 sys.getwindowsversion fallback이 작동하도록 했다. 자식 실행을 허용한 것은 아니다.
+최종 래퍼에서 import 단계의 보조 프로세스 실행 시도 3건은 모두 차단됐고,
+준비 경로 자체의 자식 프로세스 실행 시도는 0건이었다. 프로젝트 코드는 수정하지 않았다.
+
+이 래퍼 아래 ProactorEventLoop 초기화, asyncio.to_thread 결과 반환 및 루프 내부 통신이 정상 동작했다.
+준비 dry-run과 최종 생성 프로세스 모두 SAFE_PREFLIGHT_PASS/READY로 완료됐다.
+공식 prepare-only는 동일 프로세스에서 preflight 후 파일만 생성하고 실제 runner.main으로 진입하지 않는다.
+runner.main도 별도 차단하여 준비/실행 분리를 확인했다.
+공식 preflight 내부의 SDK 비호출 assertion 및 외부 래퍼의 생성/전송/분석 0회 assertion을 함께 확인했다.
+이는 확인한 SDK/HTTPX/공식 준비 경로의 비호출 검증이며 OS 방화벽 수준의 완전한 격리 보장은 아니다.
+
+### C. 원본·회차·프로필 검증
+
+신규 회차는 **t06_operational_groundtruth_isolated_final30_1**, 검사 ID는 **INSP-001406**이다.
+생성 전 해당 접두어의 READY·잠금·결과·Trace 등 산출물은 0개였으며 생성 직전에도 재확인했다.
+기존 소비 회차 t06_operational_groundtruth_isolated_1과 T01/T03/T05 기록은 그대로 보존했다.
+
+JSONL에서 대상 기록이 정확히 1건이고 다음 원본 값과 일치함을 재확인했다.
+COMPLETED / OK / OK / ALL_CHECKS_PASSED,
+anomaly_score=32.26792526245117, decision_threshold=34.1442.
+외부 evaluation_private의 내용·파일명 목록·정답·이미지·마스크·해시에 접근하지 않았다.
+READY는 공식 manifest의 기존 필드만 포함하며 외부 평가 정답이나 미탐 설명을 추가하지 않았다.
+
+해당 회차에만 조사 15초 / 최종 JSON 상한 30초를 허용한다.
+전체 Agent 60초, 여유 2초, SDK·수동 재시도 0회 및 기본 T06 15/15는 유지했다.
+30초 환경값은 준비 자식 프로세스에만 설정했고 전역 환경·.env·Settings 기본값은 바꾸지 않았다.
+전체 잔여 예산에 따른 min(승인 상한, floor(잔여 시간-2)) 축소 계약도 유지한다.
+
+### D. 이번 오프라인 회귀 결과
+
+외부 임시 출력 격리와 HTTPX 네트워크 차단을 적용하여 기존 관련 5개 모듈을 실행했다:
+test_agent_t06_infrastructure.py, test_agent_t06_isolation.py,
+test_agent_t05_timeout_configuration.py, test_agent_timeout_measurements.py,
+test_agent_operating_timeouts.py.
+이번 결과는 **206 PASS**, 7.50초다. 테스트/fixture를 새로 작성하거나 변경하지 않았다.
+READY/attempt 및 오류 코드 분류, 검사 ID·시나리오·회차 혼용 거부,
+소비 회차 재실행 금지, 15→30→15의 SDK/HTTPX/헤더/wait_for 전파,
+전체 예산 축소·2초 여유, Ground Truth 격리, NORMAL Mock 및 Evidence/Pointer 검증이 포함된다.
+전체 pytest는 이번에 실행하지 않았다. 과거 1089 PASS 수치는 이번 결과로 보고하지 않는다.
+
+### E. 공식 생성 1회 및 재검증
+
+검증된 임시 안전 래퍼의 자식 Python 안에서 공식 module.main 진입점에 다음 CLI 인자를 전달했다.
+
+```text
+run_t06_simple_e2e_once.py --attempt-id t06_operational_groundtruth_isolated_final30_1 --prepare-only --prepare-final-timeout 30
+```
+
+이 READY 생성 명령은 **정확히 1회** 실행했다. 앞선 dry-run은 offline_preflight만 호출했으며 파일을 생성하지 않았다.
+공식 prepare_attempt의 배타적 생성으로 READY 파일 1개를 만들었다.
+validate_ready_attempt(final_timeout=30) 및
+validate_attempt_timeout(configured_timeout=30, process_timeout="30", scenario="T06") 모두 PASS다.
+출력 manifest와 실제 파일의 전체 내용도 일치했다.
+
+실제 경로: data/outputs/manual_validation/t06_operational_groundtruth_isolated_final30_1_ready.json.
+state=READY, approval_required=true, analysis_attempts=0, gemini_http_requests=0,
+timeouts_seconds={investigation:15, final_ceiling:30, overall:60, reserve:2}다.
+별도 profile 필드를 추가하지 않고 기존 exact ID/timeout 계약으로 T06_FINAL_JSON_30S를 식별한다.
+재시도 0회는 기존 실행기·SDK 검증 계약으로 유지하며 임의의 manifest 필드를 추가하지 않았다.
+READY SHA256: 9F3E818E7865B504F5156098113F1E059E411D4A5FD6AE523F68CCAC0ABF3F3F.
+
+준비 경로의 SDK Client/생성/HTTPX 전송/Agent 분석 호출은 모두 0회다.
+실제 분석 실행 진입점도 호출되지 않았다. 최종 생성 프로세스에서 외부 연결 시도·예기치 않은 파일 쓰기·
+준비 경로 자식 실행 시도는 모두 0건이며 허용된 내부 연결은 6건이었다.
+새 회차 산출물은 READY만 1개이고 실행 잠금·실제 E2E 결과는 0건이다.
+
+### F. 보호 및 종료
+
+기존 대조 파일 **178개 SHA256 모두 동일**, 신규 파일은 승인된 READY **1개만** 추가됐다.
+운영 JSONL·모델/임계값·기존 회차/READY/잠금/결과·확인 원본 이미지·발표/데모 및
+운영 backend/검증 코드/테스트를 보존했다. 문서는 기존 실패/BLOCKED 이력 뒤에 이 섹션만 추가했다.
+git diff --check는 공백 오류 없이 통과했다. 임시 래퍼는 영구 프로젝트 파일로 저장하지 않았다.
+실제 Gemini 요청 **0회**, 실제 Agent 분석 **0회**, 신규 잠금·실제 결과 **0건**,
+Git add/commit/push/reset **0건**이다.
+
+최종 준비 상태는 **READY**다. 실제 T06 Gemini E2E 상태는 기존 FAIL이고,
+선택적 30초의 실제 효과·최종 보고서·자연어 안전성은 여전히 NOT TESTED다.
+HTTP 504 재발 및 최종 검증 실패 가능성을 배제하지 않는다.
+향후 실제 단일 E2E는 READY를 사용자가 확인하고 별도로 명시적 승인한 후에만 실행한다.
+이번에는 생성·재검증·기록까지만 완료하고 중단한다.
+
+## T06 선택적 최종 JSON 30초 실제 Gemini E2E 단일 검증 (2026-10-17)
+
+### A. 실행 대상·승인·Preflight
+
+최종 결과는 **PASS**다. 대상은 INSP-001406,
+회차는 t06_operational_groundtruth_isolated_final30_1이다.
+실행 전 산출물은 해당 READY 하나뿐이었으며 잠금·결과·Trace 충돌이 없었다.
+공식 --offline-only가 PASS했고 API 인증 설정 존재만 확인했다. 키 값은 출력하지 않았다.
+READY의 exact ID/scenario/timeout 계약 및 미사용 상태도 공식 검증을 통과했다.
+
+원본 JSONL의 대상 검사 1건이 COMPLETED / OK / OK / ALL_CHECKS_PASSED,
+anomaly_score=32.26792526245117, decision_threshold=34.1442와 일치함을 확인했다.
+기존 T06 첫 FAIL 회차 t06_operational_groundtruth_isolated_1은 변경하거나 재사용하지 않았다.
+운영 코드·프롬프트·Schema·모델·기본 timeout은 변경하지 않았다.
+
+별도 임시 실행기나 직접 HTTP 요청을 만들지 않고 다음 공식 실행 명령을 **정확히 1회** 실행했다.
+AGENT_FINAL_MODEL_TIMEOUT_SECONDS=30은 이 실행 자식 프로세스에만 설정했다.
+
+```text
+python -u data/outputs/manual_validation/run_t06_simple_e2e_once.py --attempt-id t06_operational_groundtruth_isolated_final30_1 --approved-single-analysis
+```
+
+Windows 내부 소켓을 차단했던 임시 감사 훅이나 준비용 SDK/HTTP 차단 Mock은 적용하지 않았다.
+공식 실행기의 기존 URL·검사 ID·allowlist·재시도 금지·파일 보호 계측은 그대로 사용했다.
+실제 실행 기록 timestamp는 2026-10-16T15:57:31.132541+00:00다.
+
+### B. 실제 HTTP와 timeout 계측
+
+모델은 두 요청 모두 gemini-3.8-flash, SDK는 google-genai 2.31.0, API는 v1beta다.
+
+| 요청 | 단계 | HTTP | SDK | HTTPX connect/read/write/pool | X-Server-Timeout | 로컬 wait_for | HTTP 경과 | SDK 경과 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | FUNCTION_CALLING 조사 | 200 | 15000ms | 모두 15초 | 15초 | 15초 | 2.129871초 | 2.144101초 |
+| 2 | STRUCTURED_OUTPUT 최종 JSON | 200 | 30000ms | 모두 30초 | 30초 | 30초 | 24.118338초 | 24.120438초 |
+
+조사 시작 잔여 예산은 약 59.984초, 최종 시작은 약 57.844초였다.
+전체 60초 / 안전 여유 2초 및 min(30, floor(57.844-2))=30 계약에 부합했다.
+SDK retry attempts=1은 최초 시도만을 뜻한다. 자동·수동 재시도는 0회이며,
+실제 SDK 요청 2회와 HTTP 전송 2회가 일치한다. 조사 1회 + 최종 JSON 1회, 성공 2회 / 실패 0회다.
+timeout_propagation_valid=true, 헤더/transport conflict=false다.
+원격 서버 내부 절대 deadline과 HTTPX 내부 절대 deadline은 NOT OBSERVABLE로 유지한다.
+
+주의: 공식 산출물의 상위 actual_final_timeout_seconds는 preflight의 NOT TESTED 값이 남아 있다.
+이 필드를 수정하지 않았다. 실제 두 번째 HTTP/SDK/wait_for 계측은 모두 **30초**를 확인한다.
+이번에는 원격 HTTP 504도 로컬 TimeoutError도 발생하지 않았다.
+
+### C. Function Calling·Evidence·NORMAL 종료
+
+첫 실제 Gemini 응답은 get_inspection_result를 요청했고 실제 인자는 INSP-001406이었다.
+서버 allowlist·인자 검증 후 Python 도구가 성공했으며 trace sequence=1 / round=1,
+executed=true / success=true / error_code=null / elapsed=1.932ms / Evidence=E0001이다.
+NORMAL 종료 조건이 true였고 추가 조사 없이 두 번째 요청이 최종 JSON 단계로 진입했다.
+
+관측된 Python get_inspection_result 호출은 2회다. API의 초기 검사 컨텍스트 조회 1회와
+Agent Function Calling 조사 실행 1회로 구분된다. Evidence가 있는 Agent 도구 실행은 **1회**이며,
+이는 Agent 분석 2회나 Gemini 조사 2회를 뜻하지 않는다. 실제 FastAPI POST와 Agent analyze는 각각 1회다.
+
+전송된 FunctionResponse 수는 두 요청 모두 0이다. NORMAL 조기 종료로 후속 도구 대화 요청을
+보내지 않고, 서버 Evidence에서 구성한 독립 사실 카탈로그를 최종 JSON 요청에 전달하는 기존 계약이다.
+FunctionResponse가 별도 조사 요청으로 Gemini에 반환됐다고 기록하지 않는다.
+Evidence 및 카탈로그는 최종 converter/validator에 사용됐고 최종 참조 검증이 통과했다.
+
+### D. 최종 JSON 및 사실 검증
+
+simple_json_generated=true, JSON parsing / SimpleReport schema / DiagnosisDraft conversion /
+Pydantic / Evidence 검증 모두 PASS다. FastAPI 응답 AnalysisResponse schema 및 검사 ID 검증도 PASS다.
+최종 검증된 Fact는 **6개**이며 모두 get_inspection_result / E0001을 참조한다.
+
+| Fact ID | JSON Pointer | 실제 검증값 |
+|---|---|---|
+| F0001 | /data/defect_detection_status | COMPLETED |
+| F0002 | /data/final_reason_code | ALL_CHECKS_PASSED |
+| F0003 | /data/final_result | OK |
+| F0004 | /data/image_quality_status | NORMAL |
+| F0005 | /data/result | OK |
+| F0006 | /data/status | COMPLETED |
+
+권고는 CONTINUE_MONITORING 하나이며 evidence_refs=[F0003], 원인 가설은 0개다.
+원본 판정·이상 점수·임계값은 보존됐다. HTTP 200 경로는 API에서 스냅샷과 원본의 일치도 검증한다.
+실제 Fact ID/Evidence/Pointer 연결은 실행 중 PASS이며 사후 읽기 전용 verifier 재검증도 PASS다.
+
+독립 Fact Catalog는 동일 원본과 실제 도구 Trace를 이용한 사후 결정적 재구성에서 **20개**였다.
+공식 runner에는 원래 전송 카탈로그 항목 수가 별도 저장되지 않아 이 수는 사후 재구성임을 구분한다.
+20개 카탈로그 후보를 최종 보고서의 검증 Fact 20개로 보고하지 않는다.
+T05 ERROR 전용 17개 사실 정책은 적용되지 않았다.
+
+### E. Ground Truth 경계 및 자연어 안전성
+
+실제 각 HTTP 전송 직전 공식 controls.assert_safe가 body 전체를 검사했고 차단 없이 통과했다.
+허용된 입력은 기존 조사 프롬프트·검사 ID·허용 조회 결과·Evidence 기반 카탈로그다.
+도구는 운영 JSONL만 조회했다. image_id는 제거되고 product_id는 TARGET-PRODUCT로 별칭화됐다.
+회차 이름을 Gemini 지시나 결함 근거로 추가하지 않았다.
+외부 평가 경로의 목록·본문·이미지·정답·마스크·해시에 접근하지 않았다.
+동일 Evidence/카탈로그의 사후 검사에서도 평가 필드나 결함 라벨이 발견되지 않았다.
+이는 확인한 운영 코드·직렬화·전송 경계에 한정한 격리 검증이며 OS 수준의 완전 격리는 아니다.
+
+원본 ASGI 응답 전체나 Gemini 최종 JSON 원문은 공식 runner가 보관하지 않았다.
+따라서 사후 response_review는 원본 응답 캡처가 아니라 실제 검증된 선택 코드·Fact 및
+변경되지 않은 서버 결정적 텍스트 렌더러에 근거한 문구 재구성임을 명시했다.
+요약은 원본 OK와 API 검증에 의해 NORMAL_MODEL_RESULT로 고정되고,
+원인 0개·검증된 권고 1개와 서버 필수 한계 4개/실제 limitation_count=4이므로 렌더링 문구가 결정된다.
+전체 응답을 보관하지 않은 한계는 남지만 이 실행의 문구에 미확정 자유 서술은 없다.
+
+검토한 요약: **기록된 모델 판정과 종합 판정은 OK입니다. 실제 무결점 제품을 보증하지 않습니다.**
+권고: **현재 기록된 판정을 유지하면서 후속 검사와 현장 상태를 관찰하세요.**
+한계는 밝기 기준치 미확인, OK의 무결점 비보장, HIGH의 비확률적 의미,
+검사 기록만으로 물리적 장애 원인 확정 불가의 4개다.
+실제 결함 발견·미탐 확인·특정 결함 위치·설비 고장·무결점 보장 표현은 없으며
+선택된 권고도 F0003의 OK 근거와 연결된다. 이 결정적 문구 범위의 안전성 검토는 **PASS**다.
+자유 자연어 전반의 안전성이나 PatchCore 미탐 성능 개선을 입증한 것은 아니다.
+
+사후 확인 코드의 최초 초기화에서 제한 설정이 없는 SimpleNamespace를 사용한 AttributeError가 있었으나,
+명시적 AgentLimits로 읽기 전용 verifier 확인을 완료했다. 이 사후 확인은 analyze/Gemini를 실행하지 않았고,
+실제 E2E 산출물이나 운영 코드·판정·검증 정책을 변경하지 않았다.
+
+### F. FastAPI·시간·사용량·비용
+
+FastAPI HTTP **200**, analysis_status=**COMPLETED**, agent_error_code=null이다.
+실제 Agent 분석 **1회**, FastAPI POST **1회**, 전체 E2E **26.370893초**다.
+
+| 요청 | 입력 | 출력 | Thinking | 총 토큰 |
+|---|---|---|---|---|
+| 조사 | 1279 | 28 | 70 | 1377 |
+| 최종 JSON | 2230 | 140 | 3455 | 5825 |
+| 합계 | **3509** | **168** | **3525** | **7202** |
+
+usage_complete=true다. 실제 청구 기록은 없으므로 비용은 **UNKNOWN**이며 금액을 추정하지 않았다.
+이전 15초 회차의 최종 504와 달리 이번 30초 요청은 실제 HTTP 약 24.118초에 성공했다.
+이는 기존 HTTP 504의 정확한 서버 내부 원인 규명이나 30초의 반복 성공률 입증은 아니다.
+
+### G. 산출물·보호·종료
+
+이번 공식 실행으로 생성된 산출물은 해당 회차의 analysis_started.lock 및 sanitized_result.json이다.
+별도 response_review.json에는 위 재구성 근거·검토 문구·한계를 저장했다.
+실행 전 대조 파일 **179개 SHA256 모두 동일**이며, 기존 READY·이전 FAIL 및
+T01/T03/T05 결과·운영 JSONL·모델/임계값·backend/검증 코드/테스트·발표/데모를 보존했다.
+원본 이미지 해시는 기존 대조에 포함된 확인 이미지 범위이며 전체 데이터셋 해시는 아니다.
+이 문서에는 신규 섹션만 추가했다. 실행기·backend·scripts·tests는 수정하지 않았다.
+
+공식 READY 파일은 최초 준비 내용 그대로이며 소비 여부는 이번 잠금/결과로 판정한다.
+이 회차는 이제 **사용 완료**로 재실행하면 안 된다. 새 READY를 생성하지 않았다.
+자동·수동 재시도 **0회**, 추가 Agent 분석 **0회**, Git add/commit/push **0건**이다.
+전체 pytest나 기존 206개 회귀는 이번 실서버 작업에서 재실행하지 않았고 과거 결과와 구분한다.
+git diff --check는 공백 오류 없이 통과했다.
+
+남은 한계는 원본 응답 전체 미보관, 상위 actual_final_timeout_seconds의 오래된 표시,
+서버 절대 deadline/실제 과금 UNKNOWN, 단일 표본으로 반복 안정성·미탐 해결을 보장할 수 없다는 점이다.
+향후 응답 보관·계측 표시 개선, 성능 평가, 추가 실서버 검증은 각각 별도 승인 대상이다.
+이번에는 승인된 단일 실행·검토·기록을 완료하고 다른 시나리오 없이 중단한다.
+
+## Day4 Step5 최종 통합 감사 참조 (2026-10-17)
+
+[공식 최종 보고서](day4-step5-final-verification.md)에 원계획 대비 구현·이번 전체 회귀·대표 실서버 4종 이력·제약을 통합했다.
+이번 최종 전체는 **1089 PASS / 0 FAIL / 4 SKIP / XFAIL·XPASS 0 / 경고 2건**, 28.08초다.
+이는 최신 입력 타입 보강 후 새로 실행한 결과이며 과거 동수의 전체 실행과 구분한다.
+Day4 백엔드 Agent 범위의 판정은 **DAY4_DONE**이다. SKIP 4건은 제외 이유와 미검증 범위를 명시했다.
+이 감사에서 실제 Gemini 요청·READY 생성·실제 E2E 신규 실행은 모두 0건이며 기존 회차는 변경하지 않았다.
+T06 원본 ASGI 본문 미보관·재구성 기반 자연어 검토 및 과거 504 내부 원인 UNKNOWN은 그대로 유지한다.

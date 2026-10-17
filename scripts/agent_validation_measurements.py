@@ -241,12 +241,32 @@ def attempt_paths(directory, attempt_id):
         "result": root / (attempt_id + "_sanitized_result.json")}
 
 
-def ready_manifest(directory, attempt_id, inspection_id, *, scenario="T03", final_timeout=30):
+def t06_final_timeout(attempt_id):
+    if not isinstance(attempt_id, str) or re.fullmatch(
+        r"t06_operational_[a-z0-9]+(?:_[a-z0-9]+)*_[1-9][0-9]*", attempt_id
+    ) is None:
+        raise ValueError("INVALID_ATTEMPT_SETTINGS")
+    return 30 if attempt_id == "t06_operational_groundtruth_isolated_final30_1" else 15
+
+
+_UNSET_FINAL_TIMEOUT = object()
+
+
+def ready_manifest(directory, attempt_id, inspection_id, *, scenario="T03", final_timeout=_UNSET_FINAL_TIMEOUT):
+    if final_timeout is _UNSET_FINAL_TIMEOUT:
+        if scenario == "T06":
+            raise ValueError("INVALID_ATTEMPT_SETTINGS")
+        final_timeout = 30
     if not isinstance(inspection_id, str) or not re.fullmatch(r"INSP-[0-9]{6,12}", inspection_id):
         raise ValueError("INVALID_INSPECTION_ID")
-    if scenario not in {"T03", "T05"} or type(final_timeout) is not int or final_timeout not in {15, 30}:
+    if scenario not in {"T03", "T05", "T06"} or type(final_timeout) is not int or final_timeout not in {15, 30}:
         raise ValueError("INVALID_ATTEMPT_SETTINGS")
     paths = attempt_paths(directory, attempt_id)
+    if scenario == "T06":
+        if inspection_id != "INSP-001406" or final_timeout != t06_final_timeout(attempt_id):
+            raise ValueError("INVALID_ATTEMPT_SETTINGS")
+    elif inspection_id == "INSP-001406" or attempt_id.startswith("t06_"):
+        raise ValueError("INVALID_ATTEMPT_SETTINGS")
     return {"schema_version": 1, "attempt_id": attempt_id, "state": "READY", "scenario": scenario,
         "inspection_id": inspection_id, "analysis_attempts": 0, "gemini_http_requests": 0,
         "approval_required": True, "model": "gemini-3.8-flash", "sdk": "2.31.0", "api_version": "v1beta",
@@ -275,7 +295,7 @@ def validate_ready_attempt(directory, attempt_id, inspection_id, **settings):
         raise ValueError("INVALID_READY_MANIFEST")
 
 
-def validate_attempt_timeout(directory, attempt_id, inspection_id, *, configured_timeout, process_timeout=None):
+def validate_process_timeout(configured_timeout, process_timeout=None):
     if type(configured_timeout) is not int or configured_timeout not in {15, 30}:
         raise ValueError("INVALID_ATTEMPT_TIMEOUT")
     if process_timeout is None:
@@ -286,6 +306,12 @@ def validate_attempt_timeout(directory, attempt_id, inspection_id, *, configured
         raise ValueError("INVALID_PROCESS_TIMEOUT")
     if selected != configured_timeout:
         raise ValueError("PROCESS_SETTINGS_TIMEOUT_MISMATCH")
+    return selected
+
+
+def validate_attempt_timeout(directory, attempt_id, inspection_id, *, configured_timeout, process_timeout=None,
+                             scenario="T05"):
+    selected = validate_process_timeout(configured_timeout, process_timeout)
     paths = attempt_paths(directory, attempt_id)
     if paths["lock"].exists() or paths["result"].exists():
         raise ValueError("ATTEMPT_ALREADY_USED")
@@ -298,8 +324,9 @@ def validate_attempt_timeout(directory, attempt_id, inspection_id, *, configured
         raise ValueError("INVALID_READY_MANIFEST") from None
     if type(prepared) is not int or prepared not in {15, 30}:
         raise ValueError("INVALID_ATTEMPT_TIMEOUT")
+    approved = t06_final_timeout(attempt_id) if scenario == "T06" else prepared
     try:
-        validate_ready_attempt(directory, attempt_id, inspection_id, scenario="T05", final_timeout=prepared)
+        validate_ready_attempt(directory, attempt_id, inspection_id, scenario=scenario, final_timeout=approved)
     except OSError:
         raise ValueError("INVALID_READY_MANIFEST") from None
     if prepared != selected:

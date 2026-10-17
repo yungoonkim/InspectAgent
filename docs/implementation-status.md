@@ -1,14 +1,18 @@
 # VisionInsight 구현 현황 보고서 (`docs/implementation-status.md`)
 
 > **프로젝트:** VisionInsight — MVTec AD Bottle 기반 Vision 검사 이상 진단 AI Agent  
-> **진행 단계:** Day 4 Step 1~3 완료, Step 4 실서버 검증 진행 중 (미완료)  
-> **최종 검증일:** 2026-10-15  
+> **진행 단계:** Day 4 Step 1~5 완료 (`DAY4_DONE`, 백엔드 Agent PoC 범위)
+>
+> **최종 검증일:** 2026-10-17
+> **최신 근거:** [Day4 Step5 최종 보고서](day4-step5-final-verification.md). 이번 전체 1089 PASS / 0 FAIL / 4 SKIP / 경고 2건, 대표 실제 Gemini E2E 4종 PASS 이력 확인. 배포 완료가 아님.
 
 ---
 
 ## 1. 개요 및 마일스톤 현황
 
-VisionInsight 프로젝트의 Day 1~Day 3.5(비전 검사 파이프라인, PatchCore 이상 검출, 종합 판정, 시나리오 재현) 완료 후, **Day 4 AI Agent 개발 및 실제 Gemini API 검증**을 진행하고 있습니다.
+VisionInsight 프로젝트의 Day 1~Day 3.5 이후 **Day4 Agent 구현·대표 실제 E2E 및 최종 오프라인 통합 검증**을 완료했습니다. 새 Gemini 요청 없이 기존 성공/실패 기록을 감사했습니다.
+
+아래 2~6절은 2026-10-15 인수인계 당시의 구현·미완료·테스트 기록을 보존한 것입니다. 당시의 536 PASS 및 잔여 작업 목록을 현재 상태로 해석하지 마세요. 최신 완료 판정·미검증 범위·다음 단계는 위 Step5 보고서가 기준입니다.
 
 | 마일스톤 | 목표 및 범위 | 상태 | 검증 결과 |
 | :--- | :--- | :---: | :--- |
@@ -16,7 +20,7 @@ VisionInsight 프로젝트의 Day 1~Day 3.5(비전 검사 파이프라인, Patch
 | **Day 2** | OpenCV 밝기 지표 계산 + JSONL 검사/이벤트 로그 자동 저장 | **완료** | `train/good` 정상 통계 기반 임계값, 스레드 세이프 JSONL 저장 |
 | **Day 3** | T01/T03/T05/T06 반복 재현 + 평가 정답 물리적 격리 | **완료** | 4대 시나리오 실측 검증 완료, 정답 라벨 100% 은닉, 57개 테스트 PASS |
 | **Day 3.5** | PatchCore 이상 검출 + 종합 판정 + Cloud Run 배포 준비 + 보안 점검 | **완료** | 180장 Coreset 학습, 29장 독립 검증, 임계값 34.1442, final_result 정책, Cloud Run CPU Dockerfile, 데이터 접근 정책 수립, 105개 테스트 PASS |
-| **Day 4** | Gemini AI Agent 실제 도구 호출 + 구조화 보고서 | **진행 중**<br>(Step 1~3 완료,<br>Step 4 실서버 검증 중) | • Step 1~3 도구 4종, AgentService, POST /analyze, Evidence/JSON Pointer 검증 완료<br>• Step 4 Function Calling 실서버 성공<br>• 스키마 격리: A/B/C PASS vs D/E2 FAIL<br>• 단순 JSON 프로토타입 실서버 PASS<br>• 미완료: 운영 서비스 연결, T01 E2E, T03/T05/T06 검증 |
+| **Day 4** | Gemini AI Agent 실제 도구 호출 + 구조화 보고서 | **완료**<br>DAY4_DONE | 도구 4종·운영 단순 JSON 연결·FastAPI·Evidence/Pointer·판정 보호 완료. T01/T03/T05/T06 실제 성공 회차 확인. 최종 전체 1089 PASS / 4 SKIP / 경고 2건. SKIP 및 T06 원본 응답 미보관 한계는 Step5에 명시 |
 | **신규 로드맵** | 동영상 Live View + 프레임 Grab + 마우스 드래그 ROI + PatchCore 추론 + Agent 재진단 | 계획 수립 | Day 4 완료 후 React 대시보드와 함께 구축 예정 (기존 모델/임계값 34.1442 유지) |
 | **Day 5** | 상황별 추가 조사 + 반례 평가 | 대기 | Agent 심층 진단 및 가설 수립 기능 |
 | **Day 6** | React E2E + Cloud Run 준비 | 대기 | 웹 대시보드 프론트엔드 (Live View 및 Grab View 포함) |

@@ -1,12 +1,20 @@
 # VisionInsight — Day 4 AI Agent 개발 현황 및 인수인계서 (`docs/day4-agent-handoff.md`)
 
-> **문서 버전:** 2.0 (Day 4 Step 1~4 진행 상태 및 실서버 검증 반영)  
-> **기준 마일스톤:** Day 4 Step 1~3 완료, Step 4 실서버 검증 진행 중 (미완료)  
+> **문서 버전:** 3.0 (최종 감사 결과 연결, 기존 2.0 본문 보존)
+>
+> **기준 마일스톤:** 2026-10-17 Day4 Step 1~5 완료 / `DAY4_DONE`
 > **참조 정책:** [AGENTS.md](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/AGENTS.md), [docs/agent-data-access-policy.md](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/docs/agent-data-access-policy.md), [docs/day4-step4-gemini-validation.md](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/docs/day4-step4-gemini-validation.md)
+
+최신 상태는 [Step5 최종 완료 보고서](day4-step5-final-verification.md)를 참조하세요.
+이번 전체 오프라인 회귀는 1089 PASS / 0 FAIL / 4 SKIP / 경고 2건입니다.
+T01/T03/T05/T06에 각각 실제 Gemini 성공 회차가 존재하며 과거 실패를 보존했습니다.
+T06 자연어 검토는 선택 코드·고정 문구 재구성에 한정되고 원본 ASGI 본문 전체는 미보관입니다.
+아래 본문은 2.0 작성 당시의 실행 기록과 잔여 작업을 그대로 보존하며 현재 미완료 목록이 아닙니다.
+Day4 완료는 반복 신뢰성·미탐 해결·웹/Cloud Run 배포 완료를 의미하지 않습니다.
 
 ---
 
-## 1. 개요 및 현재 상태
+## 1. 개요 및 이전 상태 (2.0 기록 보존)
 
 Day 4의 목표는 **Gemini Function Calling을 활용하여 검사 결과 및 실행 로그를 자율적으로 조사하고 구조화된 이상 진단 보고서를 생성하는 AI Agent를 구현하는 것**입니다.
 

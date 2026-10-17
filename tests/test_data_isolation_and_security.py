@@ -4,15 +4,18 @@ VisionInsight - Day 3.5 Prompt 8
 """
 
 import json
+import hashlib
 import os
 import re
+import shutil
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.config import get_settings
-from backend.storage import get_inspection_storage
+from backend.inspection import ImageRegistry
+from backend.storage import JsonlInspectionStorage, get_inspection_storage
 
 
 @pytest.fixture
@@ -113,7 +116,26 @@ def test_gitignore_and_dockerignore_rules():
     assert "ground_truth/" in di_content
 
 
-def test_t03_synthetic_injection_parameters_not_leaked(client):
+@pytest.fixture
+def isolated_t03_input(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[1] / "test_data/injected_images/IMG-BOTTLE-INJ-0001.png"
+    original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    target = tmp_path / source.name
+    shutil.copyfile(source, target)
+    assert target.resolve() != source.resolve()
+    assert hashlib.sha256(target.read_bytes()).hexdigest() == original_hash
+    registry = ImageRegistry()
+    registry.register_image("IMG-BOTTLE-INJ-0001", target)
+    storage = JsonlInspectionStorage(tmp_path / "inspections.jsonl", tmp_path / "logs.jsonl")
+    monkeypatch.setattr("backend.main.get_image_registry", lambda settings: registry)
+    monkeypatch.setattr("backend.main.get_inspection_storage", lambda: storage)
+    try:
+        yield target
+    finally:
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == original_hash
+
+
+def test_t03_synthetic_injection_parameters_not_leaked(client, isolated_t03_input):
     """T03 조도 저하 검사 응답에 합성 주입 사실이나 0.6x 등의 조작 배율이 노출되지 않는지 검증."""
     resp = client.post("/inspections", json={"product_id": "PROD-BOTTLE-T03", "image_id": "IMG-BOTTLE-INJ-0001"})
     assert resp.status_code == 201

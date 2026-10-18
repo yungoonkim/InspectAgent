@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import {
   Bot,
   Sparkles,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { AgentReport } from '../types/agent';
 import { getStoredAgentReport, runAgentAnalysis } from '../api/inspection';
+import { agentFailureMessage, liveAnalysisLabel, type LiveAnalysisStatus } from '../utils/agentAnalysisState';
 
 interface AgentPanelProps {
   inspectionId: string | null;
@@ -19,7 +20,16 @@ interface AgentPanelProps {
 export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
   const [prevPropId, setPrevPropId] = useState<string | null>(inspectionId);
   const [activeInspectionId, setActiveInspectionId] = useState<string>(inspectionId || 'INSP-001396');
-  const [report, setReport] = useState<AgentReport | null>(null);
+  const [loadedReport, setReport] = useState<AgentReport | null>(null);
+  const [reportOrigin, setReportOrigin] = useState<'STORED' | 'LIVE'>('STORED');
+  const [liveState, setLiveState] = useState<{id:string; status:LiveAnalysisStatus} | null>(null);
+  const requestVersion = useRef(0);
+  const livePending = useRef(false);
+  const activeId = useRef(activeInspectionId.trim());
+  const currentTarget = activeInspectionId.trim();
+  useLayoutEffect(() => { activeId.current = currentTarget; }, [currentTarget]);
+  const report = loadedReport?.inspection_id === currentTarget ? loadedReport : null;
+  const liveStatus = liveState?.id === currentTarget ? liveState.status : 'NOT_VERIFIED';
 
   const [isLoadingStored, setIsLoadingStored] = useState<boolean>(false);
   const [isAnalyzingLive, setIsAnalyzingLive] = useState<boolean>(false);
@@ -38,13 +48,22 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
 
   const fetchStoredReport = useCallback(async (targetId: string) => {
     if (!targetId.trim()) return;
+    const target = targetId.trim();
+    const version = ++requestVersion.current;
+    const isCurrent = () => version === requestVersion.current && activeId.current === target;
     setIsLoadingStored(true);
     setError(null);
+    setReport(null);
+    setLiveState({id:target, status:'NOT_VERIFIED'});
 
     try {
-      const data = await getStoredAgentReport(targetId.trim());
+      const data = await getStoredAgentReport(target);
+      if (!isCurrent()) return;
+      if (data.inspection_id !== target) throw new Error('Stored report identity mismatch');
       setReport(data);
+      setReportOrigin('STORED');
     } catch (err: any) {
+      if (!isCurrent()) return;
       // If 404, it means no stored report exists yet
       setReport(null);
       const detailMsg = err?.data?.detail?.message || err?.message || '사전 저장된 보고서가 없습니다.';
@@ -54,7 +73,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
         setError(`보고서 조회 중 오류: ${detailMsg}`);
       }
     } finally {
-      setIsLoadingStored(false);
+      if (isCurrent()) setIsLoadingStored(false);
     }
   }, []);
 
@@ -76,29 +95,37 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
   }, [showConfirmModal]);
 
   const handleConfirmLiveAnalysis = async () => {
+    if (livePending.current) return;
     setShowConfirmModal(false);
     if (!activeInspectionId.trim()) return;
+    const target = activeInspectionId.trim();
+    const version = ++requestVersion.current;
+    const isCurrent = () => version === requestVersion.current && activeId.current === target;
+    livePending.current = true;
 
     setIsAnalyzingLive(true);
     setError(null);
+    setIsLoadingStored(false);
+    setReport(null);
+    setLiveState({id:target, status:'RUNNING'});
 
     try {
-      const res = await runAgentAnalysis(activeInspectionId.trim());
+      const res = await runAgentAnalysis(target);
+      if (!isCurrent()) return;
+      if (res.inspection_id !== target || res.analysis_status !== 'COMPLETED') throw new Error('AGENT_RESPONSE_INVALID');
       setReport({
         ...res,
         provenance: 'LIVE_AGENT_ANALYSIS',
       });
+      setReportOrigin('LIVE');
+      setLiveState({id:target, status:'COMPLETED'});
     } catch (err: any) {
-      console.error('Agent analysis error:', err);
+      if (!isCurrent()) return;
+      setLiveState({id:target, status:'FAILED'});
       const errCode = err?.data?.detail?.error_code || err?.message || 'UNKNOWN_ERROR';
-      if (errCode === 'MISSING_API_KEY' || err?.status === 503) {
-        setError(
-          'Gemini API Key가 설정되지 않았습니다 (.env에 GEMINI_API_KEY 설정 필요). 데모 시연은 상단의 [기존 보고서 조회]를 이용하세요.'
-        );
-      } else {
-        setError(`AI 진단 실행 실패 (${errCode}): ${err?.data?.detail?.message || err?.message}`);
-      }
+      setError(agentFailureMessage(errCode, err?.status));
     } finally {
+      livePending.current = false;
       setIsAnalyzingLive(false);
     }
   };
@@ -113,13 +140,14 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <span className="phase-badge font-mono" data-agent-live-status={liveStatus}>{liveAnalysisLabel(liveStatus)}</span>
           {report?.provenance === 'RECORDED_TEST_FIXTURE' ? (
             <span className="text-xs bg-amber-500/15 text-amber border border-amber-500/30 px-2.5 py-0.5 rounded-full font-mono font-medium">
               RECORDED TEST FIXTURE (검증된 근거)
             </span>
           ) : report?.provenance === 'LIVE_AGENT_ANALYSIS' ? (
             <span className="text-xs bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-mono font-medium">
-              LIVE AGENT ANALYSIS
+              {reportOrigin === 'LIVE' ? 'LIVE ANALYSIS' : 'STORED LIVE REPORT'}
             </span>
           ) : report ? (
             <span className="text-xs bg-sky-500/15 text-sky-400 border border-sky-500/30 px-2.5 py-0.5 rounded-full font-mono font-medium">
@@ -128,6 +156,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
           ) : (
             <span className="phase-badge deferred font-mono">NOT ANALYZED</span>
           )}
+          {currentTarget === 'INSP-001391' && <span className="phase-badge font-mono">RECORDED TEST FIXTURE INPUT</span>}
 
           <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] text-slate-300">
             <Shield size={12} className="text-emerald" />

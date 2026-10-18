@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
 import re
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
@@ -311,6 +312,7 @@ def test_sequential_requests_have_independent_ids_and_real_traces(harness):
 def test_lazy_sdk_client_reused_and_closed_without_live_requests(harness, prohibit_real_sdk_client):
     app.dependency_overrides.pop(get_agent_service)
     harness.settings.GEMINI_API_KEY = "mock-not-real-key"
+    harness.settings.GEMINI_MODEL = "gemini-3.8-flash"
     fake_service, generator = service_for(harness.storage, normal_responses() + normal_responses())
     fake_client = fake_service.client
     fake_client.aio.aclose = AsyncMock()
@@ -333,7 +335,7 @@ def test_lazy_sdk_client_reused_and_closed_without_live_requests(harness, prohib
 def test_openapi_and_docs_register_analysis_contract(harness):
     schema = harness.client.get("/openapi.json").json()
     operation = schema["paths"]["/analyze/{inspection_id}"]["post"]
-    assert set(operation["responses"]) == {"200", "404", "422", "500", "502", "503", "504"}
+    assert set(operation["responses"]) == {"200", "404", "409", "422", "500", "502", "503", "504"}
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisResponse")
     assert operation["responses"]["503"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisErrorResponse")
     parameter = operation["parameters"][0]
@@ -353,17 +355,21 @@ def test_analysis_does_not_run_vision_or_inspection_workflow(harness):
     loader.assert_not_called()
 
 
-def test_concurrent_requests_share_client_but_not_state(harness, prohibit_real_sdk_client):
+def test_overlapping_request_rejected_then_sequential_requests_reuse_client_without_shared_state(harness, prohibit_real_sdk_client):
     app.dependency_overrides.pop(get_agent_service)
     second_record = harness.storage.save_inspection(make_record(inspection_id="INSP-000002"))
     harness.settings.GEMINI_API_KEY = "mock-not-real-key"
+    harness.settings.GEMINI_MODEL = "gemini-3.8-flash"
     fake_service, generator = service_for(harness.storage, [])
     fake_client = fake_service.client
     fake_client.aio.aclose = AsyncMock()
     fake_client.close = Mock()
+    entered, release = threading.Event(), threading.Event()
 
     async def generate(**kwargs):
-        await asyncio.sleep(0.01)
+        entered.set()
+        while not release.is_set():
+            await asyncio.sleep(0.001)
         target = re.search(r"INSP-[0-9]{6}", kwargs["contents"][0].parts[0].text).group()
         if kwargs["config"].response_mime_type == "application/json":
             payload = report_payload(harness.record if target == "INSP-000001" else second_record)
@@ -377,7 +383,15 @@ def test_concurrent_requests_share_client_but_not_state(harness, prohibit_real_s
     prohibit_real_sdk_client.side_effect = None
     prohibit_real_sdk_client.return_value = fake_client
     with ThreadPoolExecutor(max_workers=2) as executor:
-        responses = list(executor.map(lambda target: harness.client.post(f"/analyze/{target}"), ["INSP-000001", "INSP-000002"]))
+        first = executor.submit(harness.client.post, "/analyze/INSP-000001")
+        try:
+            assert entered.wait(3)
+            rejected = harness.client.post("/analyze/INSP-000002")
+            assert rejected.status_code == 409
+            assert rejected.json()["detail"]["error_code"] == "AGENT_BUSY"
+        finally:
+            release.set()
+        responses = [first.result(timeout=5), harness.client.post("/analyze/INSP-000002")]
     assert all(response.status_code == 200 for response in responses)
     for response, target in zip(responses, ["INSP-000001", "INSP-000002"]):
         body = response.json()

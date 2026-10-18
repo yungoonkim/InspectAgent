@@ -42,6 +42,10 @@ _PATH_ROOTS = frozenset({
 _PATH_SEGMENT = re.compile(r'([A-Za-z_$][A-Za-z0-9_$]*)(?:\[([0-9]{1,4}|"[A-Za-z_$][A-Za-z0-9_$]*")\])?')
 
 
+def provider_error_code(value):
+    return value if isinstance(value, str) and value in _STATUS_CODES else None
+
+
 def _safe_field_path(value):
     if not isinstance(value, str) or len(value) > 240:
         return "UNKNOWN"

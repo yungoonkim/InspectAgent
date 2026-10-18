@@ -29,7 +29,7 @@ export interface InspectionResponse {
   defect_detection_status: string | null;
   final_result: FinalVerdict | null;
   final_reason_code: string | null;
-  provenance?: 'STORED_RESULT' | 'LIVE_INSPECTION' | 'RECORDED_TEST_FIXTURE' | 'NOT_ANALYZED';
+  provenance?: 'STORED_RESULT' | 'LIVE_INSPECTION' | 'LIVEVIEW_GRAB' | 'RECORDED_TEST_FIXTURE' | 'NOT_ANALYZED';
 }
 
 export interface InspectionListResponse {

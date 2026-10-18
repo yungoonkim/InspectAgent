@@ -8,7 +8,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional, Tuple
+import logging
 import cv2
+import numpy as np
 
 from backend.config import Settings, get_settings
 from backend.vision import analyze_image
@@ -23,6 +25,9 @@ from backend.storage import (
     get_utc_now_iso,
 )
 from backend.decision import FinalReasonCode, FinalResult, determine_final_verdict
+from backend.anomaly_map_store import save_anomaly_map_artifact
+
+logger = logging.getLogger("vision_insight.inspection")
 
 
 class InspectionIdGenerator:
@@ -277,6 +282,7 @@ def execute_inspection_workflow(
     high_threshold: Optional[float] = None,
     inferencer: Optional[Any] = None,
     decision_threshold: Optional[float] = None,
+    capture_anomaly_map: bool = False,
 ) -> Tuple[InspectionRecord, List[InspectionLogRecord]]:
     """Execute Day 2 inspection workflow with end-to-end JSONL logging and record persistence.
 
@@ -527,6 +533,22 @@ def execute_inspection_workflow(
                 source="ml",
             )
             collected_logs.append(infer_done_log)
+
+            # Save anomaly map sidecar artifact if requested and available
+            if capture_anomaly_map and isinstance(pred.get("anomaly_map"), np.ndarray):
+                try:
+                    save_anomaly_map_artifact(
+                        inspection_id=inspection_id,
+                        image_id=image_id,
+                        anomaly_map=pred["anomaly_map"],
+                        original_width=width,
+                        original_height=height,
+                        model_name=model_version or "PatchCore",
+                        anomaly_score=anomaly_score,
+                        decision_threshold=decision_threshold,
+                    )
+                except Exception as map_err:
+                    logger.warning(f"Failed to persist anomaly map sidecar for {inspection_id}: {map_err}")
         except Exception as infer_err:
             defect_detection_status = "FAILED"
             inference_error_msg = _sanitize_error_message(infer_err)

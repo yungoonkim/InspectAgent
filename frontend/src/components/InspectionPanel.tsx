@@ -18,7 +18,9 @@ import {
 
 interface InspectionPanelProps {
   currentInspection: InspectionResponse | null;
-  onInspectionChange: (inspection: InspectionResponse | null) => void;
+  onInspectionChange: (inspection: InspectionResponse | null, version?: number) => void;
+  onSelectionStart?: () => number;
+  getSelectionVersion?: () => number;
   onRunAgent: (inspectionId: string) => void;
 }
 
@@ -26,6 +28,8 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
   currentInspection,
   onInspectionChange,
   onRunAgent,
+  onSelectionStart,
+  getSelectionVersion,
 }) => {
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string>('IMG-BOTTLE-0001');
@@ -36,6 +40,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
   const [isLoadingImages, setIsLoadingImages] = useState<boolean>(false);
   const [isQuerying, setIsQuerying] = useState<boolean>(false);
   const [isInspecting, setIsInspecting] = useState<boolean>(false);
+  const [captureAnomalyMap, setCaptureAnomalyMap] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const initialLoadedRef = useRef<boolean>(false);
@@ -43,6 +48,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
   // Load available registered image IDs and recent inspections on mount
   useEffect(() => {
     let isMounted = true;
+    const initialVersion = getSelectionVersion?.();
 
     void (async () => {
       try {
@@ -71,7 +77,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
             onInspectionChange({
               ...initial,
               provenance: 'STORED_RESULT',
-            });
+            }, initialVersion);
             setInputInspectionId(initial.inspection_id);
           }
         }
@@ -83,7 +89,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [onInspectionChange]);
+  }, [onInspectionChange, getSelectionVersion]);
 
   // Handle Query Stored Inspection by ID (Zero ML call)
   const handleQueryInspection = async (
@@ -98,6 +104,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
 
     setIsQuerying(true);
     setError(null);
+    const version = onSelectionStart?.();
 
     try {
       const res = await getInspection(idToFetch);
@@ -106,7 +113,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
       onInspectionChange({
         ...res,
         provenance: prov,
-      });
+      }, version);
       setInputInspectionId(idToFetch);
     } catch (err: any) {
       console.error('Inspection query error:', err);
@@ -125,13 +132,14 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
 
     setIsInspecting(true);
     setError(null);
+    const version = onSelectionStart?.();
 
     try {
-      const res = await createInspection(productId, selectedImageId);
+      const res = await createInspection(productId, selectedImageId, captureAnomalyMap);
       onInspectionChange({
         ...res,
         provenance: 'LIVE_INSPECTION',
-      });
+      }, version);
       setInputInspectionId(res.inspection_id);
     } catch (err: any) {
       console.error('Live inspection execution error:', err);
@@ -161,7 +169,9 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
           <h2 className="panel-title">정적 이미지 결함 검사 (Inspection Panel)</h2>
         </div>
         <div className="flex items-center gap-2">
-          {currentInspection?.provenance === 'LIVE_INSPECTION' ? (
+          {currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' ? (
+            <span className="text-xs text-amber font-mono">EXPERIMENTAL LIVEVIEW_GRAB</span>
+          ) : currentInspection?.provenance === 'LIVE_INSPECTION' ? (
             <span className="text-xs bg-emerald-500/15 text-emerald border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono font-medium">
               LIVE INSPECTION
             </span>
@@ -183,7 +193,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
         {/* Source Provenance Guide Alert */}
         <div className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 p-2.5 rounded-lg flex items-center justify-between">
           <span>
-            <strong className="text-cyan">SOURCE: REGISTERED STATIC IMAGE</strong> — MVTec AD 병 데이터셋 기반
+            <strong className="text-cyan">현재 결과 SOURCE: {!currentInspection ? 'NONE' : currentInspection.metrics?.input_source === 'LIVEVIEW_GRAB' ? 'EXPERIMENTAL LIVEVIEW_GRAB' : 'REGISTERED STATIC IMAGE'}</strong> — 아래 입력 컨트롤은 등록 정적 이미지 검사 전용
           </span>
           <span className="text-slate-500 font-mono text-[10px]">Threshold: 34.1442</span>
         </div>
@@ -273,6 +283,21 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
                 placeholder="예: ABCD1541"
               />
             </div>
+          </div>
+
+          {/* Option: Capture Anomaly Map Sidecar Artifact */}
+          <div className="flex items-center gap-2 pt-1 pb-0.5">
+            <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={captureAnomalyMap}
+                onChange={(e) => setCaptureAnomalyMap(e.target.checked)}
+                disabled={isInspecting}
+                className="rounded border-slate-700 text-cyan focus:ring-0 focus:ring-offset-0 bg-slate-950"
+              />
+              <span className="font-medium text-slate-300">신규 검사 시 이상지도(Anomaly Map) 저장</span>
+            </label>
+            <span className="text-[10px] text-slate-500 font-mono">(Sidecar Artifact 생성)</span>
           </div>
 
           {/* Inspection ID Input & Action Buttons */}

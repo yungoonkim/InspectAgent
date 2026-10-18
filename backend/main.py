@@ -6,10 +6,12 @@ and fault injection comparison endpoints for the MVTec AD Bottle inspection AI A
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import re
 from typing import Any, Dict, Optional
 import cv2
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -32,6 +34,11 @@ from backend.ml.patchcore_inferencer import get_patchcore_inferencer
 from backend.agent.api import AgentRuntime, router as agent_router
 from backend.video_api import VideoRuntime, allowed_origins, router as video_router
 from backend.roi_api import router as roi_router
+from backend.grab_inspection import GrabInspectionRequest, GrabInspectionError, get_grab_runtime, require_grab_owner
+from backend.capture_store import CaptureError
+from backend.reinspection_store import ManualReviewRequest, ReinspectionError
+from backend.video_api import get_video_runtime, require_origin, public_error
+from backend.vision_review_api import build_router as build_vision_review_router
 
 settings = get_settings()
 
@@ -69,6 +76,7 @@ app = FastAPI(
 app.include_router(agent_router)
 app.include_router(video_router)
 app.include_router(roi_router)
+app.include_router(build_vision_review_router(lambda: get_inspection_storage()))
 
 # CORS middleware for development and deployment
 app.add_middleware(
@@ -164,6 +172,11 @@ class InspectionCreateRequest(BaseModel):
         ...,
         description="Server-managed neutral image identifier (e.g., IMG-BOTTLE-0001)",
         examples=["IMG-BOTTLE-0001"],
+    )
+    capture_anomaly_map: bool = Field(
+        default=False,
+        description="Optional flag to capture and persist 2D PatchCore anomaly map as sidecar artifact",
+        examples=[False],
     )
 
 
@@ -461,6 +474,7 @@ def create_inspection_endpoint(
             high_threshold=current_settings.BRIGHTNESS_HIGH_THRESHOLD,
             inferencer=inferencer,
             decision_threshold=current_settings.DECISION_THRESHOLD,
+            capture_anomaly_map=payload.capture_anomaly_map,
         )
 
         return _record_to_response(record)
@@ -472,6 +486,73 @@ def create_inspection_endpoint(
         raise HTTPException(status_code=422, detail=str(err))
     except StorageError as err:
         raise HTTPException(status_code=500, detail=f"Storage error: Failed to persist inspection record: {err}")
+
+
+@app.post("/captures/{capture_id}/inspect", response_model=InspectionResponse, status_code=201)
+def inspect_grab_capture(capture_id: str, payload: GrabInspectionRequest, request: Request):
+    video_runtime = get_video_runtime(request)
+    require_origin(request, video_runtime)
+    try:
+        current_settings = video_runtime.settings
+        record = get_grab_runtime(request, current_settings).inspect(
+            video_runtime.captures, request.cookies.get(video_runtime.captures.cookie_name),
+            request.headers.get("x-capture-csrf"), capture_id, payload, get_inspection_storage(),
+            lambda: get_patchcore_inferencer() if current_settings.ENABLE_PATCHCORE else None, current_settings,
+        )
+        return _record_to_response(record)
+    except (CaptureError, GrabInspectionError, ReinspectionError) as error:
+        public_error(error)
+    except Exception:
+        raise HTTPException(status_code=503, detail={"error_code": "GRAB_INSPECTION_FAILED"}) from None
+
+
+@app.get("/reinspection-groups/by-capture/{capture_id}")
+def get_capture_reinspection_group(capture_id: str, request: Request):
+    runtime = get_video_runtime(request)
+    if request.headers.get("origin") is not None:
+        require_origin(request, runtime)
+    try:
+        owner = runtime.captures.authorize(request.cookies.get(runtime.captures.cookie_name))
+        return get_grab_runtime(request, runtime.settings).reinspections.for_capture(capture_id, owner)
+    except (CaptureError, ReinspectionError) as error:
+        public_error(error)
+
+
+@app.get("/reinspection-groups/{group_id}")
+def get_reinspection_group(group_id: str, request: Request):
+    runtime = get_video_runtime(request)
+    if request.headers.get("origin") is not None:
+        require_origin(request, runtime)
+    try:
+        owner = runtime.captures.authorize(request.cookies.get(runtime.captures.cookie_name))
+        return get_grab_runtime(request, runtime.settings).reinspections.get(group_id, owner)
+    except (CaptureError, ReinspectionError) as error:
+        public_error(error)
+
+
+@app.post("/reinspection-groups/{group_id}/manual-reviews")
+def save_manual_review(group_id: str, payload: ManualReviewRequest, request: Request):
+    runtime = get_video_runtime(request)
+    require_origin(request, runtime)
+    try:
+        owner = runtime.captures.authorize(request.cookies.get(runtime.captures.cookie_name),
+            request.headers.get("x-capture-csrf"), write=True)
+        return get_grab_runtime(request, runtime.settings).reinspections.review(group_id, owner, payload)
+    except (CaptureError, ReinspectionError) as error:
+        public_error(error)
+
+
+@app.get("/inspections/{inspection_id}/input-image")
+def grab_inspection_image(inspection_id: str, request: Request):
+    try:
+        record = get_inspection_storage().get_inspection(inspection_id)
+        require_grab_owner(request, record)
+        runtime = get_video_runtime(request)
+        owner = runtime.captures.authorize(request.cookies.get(runtime.captures.cookie_name))
+        payload = get_grab_runtime(request, runtime.settings).authorize_record(record, owner)
+        return Response(payload, media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    except (CaptureError, GrabInspectionError) as error:
+        public_error(error)
 
 
 def _record_to_response(record: Any) -> InspectionResponse:
@@ -538,6 +619,61 @@ def list_inspection_images(
 
 
 @app.get(
+    "/inspections/images/{image_id}/file",
+    summary="Fetch binary image file for a registered neutral image ID",
+    description=(
+        "Returns raw lossless PNG image bytes for an allowlisted neutral image ID. "
+        "Strictly prevents path traversal and prohibits leaking ground truth or internal filesystem paths."
+    ),
+    responses={
+        200: {"content": {"image/png": {}}, "description": "Binary image file"},
+        400: {"description": "Invalid image identifier format"},
+        404: {"description": "Image not found or unregistered"},
+    },
+)
+def get_inspection_image_file(
+    image_id: str,
+    current_settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    """Safely return registered static image binary without executing ML or modifying storage."""
+    # 1. Enforce neutral ID format security
+    if not re.match(r"^IMG-BOTTLE-(?:[0-9]{4,8}|INJ-[0-9]{4,8}|NONEXISTENT)$", image_id):
+        raise HTTPException(status_code=400, detail="Invalid image_id format. Must be a neutral server-managed identifier.")
+
+    # 2. Resolve image via ImageRegistry
+    registry = get_image_registry(current_settings)
+    if not registry.contains(image_id):
+        raise HTTPException(status_code=404, detail=f"Image '{image_id}' is not registered.")
+
+    image_path = registry.get_path(image_id)
+    if image_path is None or not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Image file for '{image_id}' was not found on server.")
+
+    resolved = image_path.resolve()
+
+    # 3. Security checks: Prevent path traversal & exclude ground truth
+    dataset_root = current_settings.absolute_dataset_path.resolve()
+    injected_root = current_settings.absolute_injected_images_path.resolve() if current_settings.absolute_injected_images_path else None
+
+    is_within_dataset = dataset_root in resolved.parents or resolved == dataset_root
+    is_within_injected = (injected_root is not None) and (injected_root in resolved.parents or resolved == injected_root)
+
+    if not (is_within_dataset or is_within_injected):
+        raise HTTPException(status_code=404, detail="Access denied: path is outside allowed image directories.")
+
+    if "ground_truth" in resolved.parts:
+        raise HTTPException(status_code=404, detail="Access denied: ground truth directory access prohibited.")
+
+    # 4. Return exact binary image without modification or scaling
+    return FileResponse(
+        path=str(resolved),
+        media_type="image/png",
+        filename=f"{image_id}.png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get(
     "/inspections/{inspection_id}",
     response_model=InspectionResponse,
     summary="Retrieve single inspection record",
@@ -581,6 +717,109 @@ def get_agent_report_endpoint(
             "error_code": "NO_STORED_REPORT",
             "message": f"검사 '{inspection_id}'에 대해 사전 저장된 Gemini 진단 보고서가 없습니다. [Gemini AI 진단 실행] 버튼으로 새로 분석할 수 있습니다.",
         },
+    )
+
+
+@app.get(
+    "/inspections/{inspection_id}/anomaly-map",
+    summary="Retrieve stored PatchCore anomaly map metadata",
+    description="Read-only query for previously saved anomaly map sidecar artifact. Never triggers model inference.",
+    responses={
+        400: {"description": "Malformed inspection_id"},
+        404: {"description": "Anomaly map not available for this inspection"},
+    },
+)
+def get_anomaly_map_endpoint(
+    inspection_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    """Retrieve anomaly map metadata for an inspection."""
+    from backend.anomaly_map_store import get_anomaly_map_metadata, is_valid_inspection_id
+    try:
+        require_grab_owner(request, get_inspection_storage().get_inspection(inspection_id))
+    except (CaptureError, GrabInspectionError) as error:
+        public_error(error)
+
+    if not is_valid_inspection_id(inspection_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid or malformed inspection_id: '{inspection_id}'",
+        )
+
+    meta = get_anomaly_map_metadata(inspection_id)
+    record = get_inspection_storage().get_inspection(inspection_id) if meta else None
+    if not meta or not record or not _anomaly_map_matches_record(meta, record):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "MAP_NOT_AVAILABLE",
+                "message": f"검사 '{inspection_id}'에 저장된 이상지도(Anomaly Map) 데이터가 없습니다.",
+            },
+        )
+
+    meta["available"] = True
+    meta["overlay_url"] = f"/inspections/{inspection_id}/anomaly-map/overlay.png"
+    return meta
+
+
+def _anomaly_map_matches_record(metadata: Dict[str, Any], record: Any) -> bool:
+    metrics = record.metrics if isinstance(record.metrics, dict) else {}
+    return (
+        metadata.get("inspection_id") == record.inspection_id
+        and metadata.get("image_id") == record.image_id
+        and metadata.get("original_image_width") == metrics.get("width")
+        and metadata.get("original_image_height") == metrics.get("height")
+    )
+
+
+@app.get(
+    "/inspections/{inspection_id}/anomaly-map/overlay.png",
+    summary="Retrieve transparent PatchCore anomaly map overlay PNG",
+    description="Returns pre-rendered RGBA overlay PNG for direct 1:1 superposition on original image. Never triggers model inference.",
+    responses={
+        400: {"description": "Malformed inspection_id"},
+        404: {"description": "Anomaly map overlay PNG not found"},
+    },
+)
+def get_anomaly_map_overlay_endpoint(
+    inspection_id: str,
+    request: Request,
+) -> FileResponse:
+    """Return pre-rendered transparent overlay PNG for an inspection."""
+    from backend.anomaly_map_store import get_anomaly_map_overlay_path, is_valid_inspection_id
+    record = get_inspection_storage().get_inspection(inspection_id)
+    try:
+        require_grab_owner(request, record)
+    except (CaptureError, GrabInspectionError) as error:
+        public_error(error)
+
+    if not is_valid_inspection_id(inspection_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid or malformed inspection_id: '{inspection_id}'",
+        )
+
+    overlay_path = get_anomaly_map_overlay_path(inspection_id)
+    if overlay_path:
+        from backend.anomaly_map_store import get_anomaly_map_metadata
+        metadata = get_anomaly_map_metadata(inspection_id)
+        record = get_inspection_storage().get_inspection(inspection_id)
+        if not metadata or not record or not _anomaly_map_matches_record(metadata, record):
+            overlay_path = None
+    if not overlay_path or not overlay_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "MAP_NOT_AVAILABLE",
+                "message": f"검사 '{inspection_id}'의 이상지도 오버레이 이미지가 존재하지 않습니다.",
+            },
+        )
+
+    return FileResponse(
+        path=str(overlay_path),
+        media_type="image/png",
+        filename=f"{inspection_id}_anomaly_overlay.png",
+        headers={"Cache-Control": "no-store" if record and record.metrics.get("input_source") == "LIVEVIEW_GRAB" else "public, max-age=3600"},
     )
 
 

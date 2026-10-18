@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
+import logging
 import math
 import re
 import threading
@@ -15,6 +16,8 @@ from google.genai import types
 from pydantic import ValidationError
 
 from backend.agent.errors import AgentFailure
+from backend.agent.runtime_safety import API_VERSION, SDK_ATTEMPTS, PROVIDER_REQUEST_LIMIT
+from backend.agent.diagnostics import provider_error_code
 from backend.agent.error_policy import (
     error_report_covered, error_report_scope, error_required_facts, image_load_failure_evidence_ready,
 )
@@ -29,6 +32,36 @@ from backend.agent.schemas import (
 )
 from backend.agent.tools import INSPECTION_ID_PATTERN, InspectionTools, _valid_id
 from backend.config import get_settings
+
+logger = logging.getLogger("backend.agent.service")
+
+
+def _extract_status_code(exc: Exception) -> Optional[int]:
+    code = getattr(exc, "code", None)
+    if type(code) is int and 100 <= code <= 599:
+        return code
+    status_code = getattr(exc, "status_code", None)
+    if type(status_code) is int and 100 <= status_code <= 599:
+        return status_code
+    response = getattr(exc, "response", None)
+    if response is not None:
+        resp_code = getattr(response, "status_code", None)
+        if type(resp_code) is int and 100 <= resp_code <= 599:
+            return resp_code
+    return None
+
+
+def _extract_provider_error_code(exc: Exception) -> Optional[str]:
+    return provider_error_code(getattr(exc, "status", None) or getattr(exc, "reason", None))
+
+
+def _sanitize_error_message(message: str) -> str:
+    """Strip potential credentials or auth headers while preserving error diagnostics."""
+    if not message:
+        return ""
+    sanitized = re.sub(r"(?:AIza[0-9A-Za-z-_]{35}|key=[^&\s]+|Bearer\s+[^\s]+)", "[REDACTED]", message)
+    return sanitized[:300]
+
 
 PRODUCT_ALIAS = "TARGET-PRODUCT"
 FINAL_REPORT_RESERVE_SECONDS = 2
@@ -80,6 +113,7 @@ class RequestState:
     product_id: Optional[str] = None
     snapshot: Optional[dict] = None
     deadline: Optional[float] = None
+    provider_calls: int = 0
 
 
 def function_declarations():
@@ -237,8 +271,9 @@ class AgentService:
                 client = genai.Client(
                     api_key=self.settings.GEMINI_API_KEY,
                     http_options=types.HttpOptions(
+                        api_version=API_VERSION,
                         timeout=int(self.limits.model_timeout_seconds * 1000),
-                        retry_options=types.HttpRetryOptions(attempts=1),
+                        retry_options=types.HttpRetryOptions(attempts=SDK_ATTEMPTS),
                     ),
                 )
                 owned_client = True
@@ -249,17 +284,32 @@ class AgentService:
                 return await self._run(client, safe_model, state)
         except AgentFailure as failure:
             error = failure.code
+            logger.warning(
+                "Agent validation failed: correlation_id=%s, model=%s, stage=AGENT_VALIDATION, "
+                "exception_class=AgentFailure, error_code=%s",
+                inspection_id if _valid_id(inspection_id, INSPECTION_ID_PATTERN) else None, safe_model, error,
+            )
         except TimeoutError:
             error = "AGENT_TIMEOUT"
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "Agent internal error during analysis: correlation_id=%s, model=%s, "
+                "stage=AGENT_RUNTIME, exception_class=%s",
+                inspection_id if _valid_id(inspection_id, INSPECTION_ID_PATTERN) else None,
+                safe_model, exc.__class__.__name__,
+            )
             error = "AGENT_INTERNAL_ERROR"
         finally:
             if owned_client:
                 try:
                     await asyncio.wait_for(client.aio.aclose(), timeout=self.limits.model_timeout_seconds)
-                    client.close()
                 except Exception:
                     pass
+                finally:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
         return DiagnosisResult(
             inspection_id=inspection_id if _valid_id(inspection_id, INSPECTION_ID_PATTERN) else None,
             analysis_status="FAILED", error_code=error, model_name=safe_model,
@@ -296,9 +346,10 @@ class AgentService:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             automatic_continuation=False,
             http_options=types.HttpOptions(
+                api_version=API_VERSION,
                 timeout=int(timeout_seconds * 1000),
                 headers={"X-Server-Timeout": str(math.ceil(timeout_seconds))},
-                retry_options=types.HttpRetryOptions(attempts=1),
+                retry_options=types.HttpRetryOptions(attempts=SDK_ATTEMPTS),
             ),
         )
         if structured:
@@ -311,14 +362,35 @@ class AgentService:
         else:
             config.tools = [types.Tool(function_declarations=function_declarations())]
             config.tool_config = types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="AUTO"))
+        stage = "STRUCTURED_REPORT" if structured else f"TOOL_ROUND_{round_number}"
+        if state.provider_calls >= PROVIDER_REQUEST_LIMIT:
+            raise AgentFailure("PROVIDER_REQUEST_LIMIT")
+        state.provider_calls += 1
+        logger.info(
+            "Gemini request admitted: correlation_id=%s, stage=%s, provider_request_number=%s, provider_request_limit=%s",
+            state.inspection_id, stage, state.provider_calls, PROVIDER_REQUEST_LIMIT,
+        )
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(model=model, contents=list(contents), config=config),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            logger.warning(
+                "Gemini generate_content timeout: correlation_id=%s, model=%s, stage=%s, timeout_seconds=%s, "
+                "exception_class=TimeoutError, http_status=None, provider_code=None, provider_request_number=%s",
+                state.inspection_id, model, stage, timeout_seconds, state.provider_calls,
+            )
             raise AgentFailure("GEMINI_TIMEOUT") from None
-        except Exception:
+        except Exception as exc:
+            exc_class = exc.__class__.__name__
+            http_status = _extract_status_code(exc)
+            provider_code = _extract_provider_error_code(exc)
+            logger.error(
+                "Gemini generate_content failed: correlation_id=%s, model=%s, stage=%s, "
+                "exception_class=%s, http_status=%s, provider_code=%s, provider_request_number=%s, message=[REDACTED]",
+                state.inspection_id, model, stage, exc_class, http_status, provider_code, state.provider_calls,
+            )
             raise AgentFailure("GEMINI_REQUEST_FAILED") from None
         if _json_bytes(response.model_dump(mode="json", exclude_none=True)) > self.limits.max_payload_bytes:
             raise AgentFailure("MODEL_RESPONSE_TOO_LARGE")
@@ -546,6 +618,8 @@ class AgentService:
         if any(entry.tool_name == "get_inspection_history" and entry.success for entry in state.trace):
             limitations.add("HISTORY_BOUNDED")
         limitation_texts = [LIMITATION_TEXT[code] for code in sorted(limitations)]
+        if state.inspection_id == "INSP-001391":
+            limitation_texts.append("이 검사는 기록된 테스트 fixture입니다. 주입된 점수와 NG 판정은 실제 PatchCore 검출 성능을 입증하지 않습니다.")
         if any("brightness_comparison" in document for tool, document in state.evidence.values()):
             limitation_texts.append("과거 밝기 비교는 저장된 수치의 참고용 기술통계입니다. 측정 알고리즘·ROI 일치와 독립 촬영 여부는 확인되지 않았으며 추세나 물리적 설비 상태를 증명하지 않습니다.")
         return DiagnosisResult(

@@ -60,13 +60,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
   const fps = video?.fps || 30.0;
   const maxFrames = video?.frame_count ? video.frame_count - 1 : 239;
 
-  // Invalidate ROI editing when playback state or timeline changes
-  const invalidateRoiIfActive = () => {
-    if (roiState !== 'NO_ROI') {
-      onToggleRoi(currentFrame, false);
-    }
-  };
-
   // Video time update handler
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -78,9 +71,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
       );
       if (calculatedFrame !== currentFrame) {
         setCurrentFrame(calculatedFrame);
-        if (roiState !== 'NO_ROI') {
-          invalidateRoiIfActive();
-        }
       }
     }
   };
@@ -88,7 +78,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
   const handlePlayPause = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      invalidateRoiIfActive();
       videoRef.current
         .play()
         .then(() => setIsPlaying(true))
@@ -103,7 +92,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    invalidateRoiIfActive();
     const targetTime = parseFloat(e.target.value);
     if (videoRef.current) {
       videoRef.current.currentTime = targetTime;
@@ -122,7 +110,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
       videoRef.current.pause();
       setIsPlaying(false);
     }
-    invalidateRoiIfActive();
 
     const frameDuration = 1 / fps;
     const newTime = Math.min(
@@ -139,7 +126,6 @@ export const LiveView: React.FC<LiveViewProps> = ({
   };
 
   const handleRestart = () => {
-    invalidateRoiIfActive();
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
       setCurrentTime(0);
@@ -172,6 +158,7 @@ export const LiveView: React.FC<LiveViewProps> = ({
   };
 
   const isPaused = !isPlaying;
+  const frozen = isPaused && roiState === 'EDITING' && capture?.frame_index === currentFrame;
 
   return (
     <div className="panel-card">
@@ -226,10 +213,8 @@ export const LiveView: React.FC<LiveViewProps> = ({
           <div className="video-overlay-badge">
             <div className={`live-indicator-dot ${isPaused ? 'paused' : ''}`} />
             <span>
-              {roiState === 'EDITING'
+              {frozen
                 ? `FROZEN FRAME (ROI EDITING${capture ? ` #${capture.frame_index}` : ''})`
-                : roiState === 'APPLIED'
-                ? `FROZEN FRAME (ROI APPLIED${capture ? ` #${capture.frame_index}` : ''})`
                 : isPlaying
                 ? videoLoaded
                   ? 'STREAM PLAYING'
@@ -274,9 +259,9 @@ export const LiveView: React.FC<LiveViewProps> = ({
           {roiState !== 'NO_ROI' && (
             <RoiOverlay
               roi={roi}
-              roiState={roiState}
+              roiState={isPaused ? roiState : 'APPLIED'}
               onChangeRoi={onChangeRoi}
-              frozenImageUrl={imageBlobUrl}
+              frozenImageUrl={frozen ? imageBlobUrl : null}
               imageWidth={video?.width || 1920}
               imageHeight={video?.height || 480}
             />
@@ -284,6 +269,7 @@ export const LiveView: React.FC<LiveViewProps> = ({
         </div>
 
         {/* Control and Scrubber Bar */}
+        {roiState !== 'NO_ROI' && <p className="text-xs text-amber-300">저장 ROI 유지 · 자동 제품 추적 아님. 병 전체가 ROI 안에 있는지 확인하세요. 같은 녹화 프레임의 재획득은 새 광학 정보가 아닙니다.</p>}
         <div className="video-controls-bar">
           {/* Progress / Seek bar */}
           <div className="scrubber-row">
@@ -368,7 +354,7 @@ export const LiveView: React.FC<LiveViewProps> = ({
                   roiState === 'EDITING'
                     ? '선택된 ROI 영역을 600×600 ImageView로 Crop 반영합니다'
                     : roiState === 'APPLIED'
-                    ? '현재 적용된 Crop 결과를 유지/재확인합니다'
+                    ? '현재 프레임을 Grab하고 저장 ROI를 적용합니다. 같은 녹화 프레임은 새 정보가 아닙니다.'
                     : '서버에서 정확한 현재 프레임을 전체 캡처합니다'
                 }
               >
@@ -384,7 +370,7 @@ export const LiveView: React.FC<LiveViewProps> = ({
                       {roiState === 'EDITING'
                         ? 'Grab (Crop 반영)'
                         : roiState === 'APPLIED'
-                        ? 'Grab (적용됨)'
+                        ? 'Grab + 저장 ROI'
                         : 'Grab'}
                     </span>
                   </>

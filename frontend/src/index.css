@@ -1261,3 +1261,216 @@ body {
   gap: 10px;
 }
 
+/* ==============================================================================
+   Day 7 Step 3: Registered Static Image & Inspection Verdict Overlay System
+   ============================================================================== */
+
+.source-mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card-subtle);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-panel);
+}
+
+.source-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.source-tab-btn:hover:not(:disabled) {
+  color: var(--text-main);
+}
+
+.source-tab-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.source-tab-btn.active {
+  background: var(--bg-card);
+  color: var(--color-cyan);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Floating Verdict Overlay Card */
+.verdict-overlay-card {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  max-width: 360px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-panel);
+  padding: 12px 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.verdict-overlay-card.verdict-ok {
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px -3px rgba(52, 211, 153, 0.25);
+}
+
+.verdict-overlay-card.verdict-ng {
+  border-color: rgba(248, 113, 113, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px -3px rgba(248, 113, 113, 0.3);
+}
+
+.verdict-overlay-card.verdict-reinspect {
+  border-color: rgba(251, 191, 36, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 15px -3px rgba(251, 191, 36, 0.25);
+}
+
+.verdict-overlay-card.verdict-error {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+.verdict-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.verdict-badge-lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.5px;
+}
+
+.verdict-badge-lg.ok {
+  background: rgba(52, 211, 153, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+}
+
+.verdict-badge-lg.ng {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+}
+
+.verdict-badge-lg.reinspect {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+}
+
+.verdict-badge-lg.error {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.6);
+}
+
+.verdict-mock-banner {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.3px;
+}
+
+.verdict-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.verdict-meta-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.verdict-meta-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.verdict-meta-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.verdict-location-notice {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(2, 6, 23, 0.5);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid var(--border-panel);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.verdict-viewport-hint {
+  font-size: 10px;
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Day 7 Step 4: Heatmap Controls & Notices */
+.btn-tool.active-heatmap {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(251, 191, 36, 0.6);
+  color: #fbbf24;
+  font-weight: 600;
+  box-shadow: 0 0 10px -2px rgba(251, 191, 36, 0.3);
+}
+
+.heatmap-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.verdict-location-notice.active-map {
+  border-left-color: #fbbf24;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.verdict-location-notice.map-available {
+  border-left-color: #38bdf8;
+  color: #bae6fd;
+  background: rgba(56, 189, 248, 0.1);
+}
+

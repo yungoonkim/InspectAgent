@@ -4,7 +4,9 @@ import { WorkflowStepper } from './components/WorkflowStepper';
 import { LiveView } from './components/LiveView';
 import { ImageView } from './components/ImageView';
 import { InspectionPanel } from './components/InspectionPanel';
+import { GrabInspectionPanel } from './components/GrabInspectionPanel';
 import { AgentPanel } from './components/AgentPanel';
+import { VisionReviewPanel } from './components/VisionReviewPanel';
 import {
   checkHealth,
   getVideos,
@@ -18,6 +20,7 @@ import type { RoiRect, CropData, RoiState } from './types/roi';
 import type { InspectionResponse } from './types/inspection';
 import { loadImageFromUrl, cropExactPixels } from './utils/imageCropper';
 import { computeRoiCenter } from './utils/coordinateTransforms';
+import { roiFits, sameSource, sourceKey } from './utils/roiLifetime';
 
 const DEFAULT_ROI: RoiRect = {
   x: 800,
@@ -45,10 +48,25 @@ export const App: React.FC = () => {
 
   // Phase F-2: Static Image Inspection & Agent state
   const [currentInspection, setCurrentInspection] = useState<InspectionResponse | null>(null);
+  const selectionVersionRef = useRef(0);
+  const getSelectionVersion = useCallback(() => selectionVersionRef.current, []);
+  const startSelection = useCallback(() => {
+    selectionVersionRef.current += 1;
+    setCurrentInspection(null);
+    return selectionVersionRef.current;
+  }, []);
+  const handleInspectionChange = useCallback((inspection: InspectionResponse | null, version?: number) => {
+    if (version !== undefined && version !== selectionVersionRef.current) return;
+    setCurrentInspection(inspection);
+  }, []);
 
   // Keep ref to revoke previous Blob URLs to prevent memory leaks
   const prevBlobUrlRef = useRef<string | null>(null);
   const prevCropBlobUrlRef = useRef<string | null>(null);
+  const videoKeyRef = useRef('');
+  const grabEpochRef = useRef(0);
+  const grabBusyRef = useRef(false);
+  const acquiredFramesRef = useRef(new Set<string>());
 
   // Check API, bootstrap session, and load initial video metadata
   const loadInitialData = useCallback(async () => {
@@ -66,6 +84,19 @@ export const App: React.FC = () => {
       const videoList = await getVideos();
       if (videoList.videos && videoList.videos.length > 0) {
         const primaryVideo = videoList.videos[0];
+        const nextKey = sourceKey(primaryVideo);
+        if (videoKeyRef.current !== nextKey) {
+          videoKeyRef.current = nextKey;
+          grabEpochRef.current++;
+          acquiredFramesRef.current.clear();
+          setRoiState('NO_ROI');
+          setRoi(DEFAULT_ROI);
+          setCapture(null);
+          setCropData(null);
+          setImageBlobUrl(null);
+          setCurrentInspection(null);
+          selectionVersionRef.current++;
+        }
         setVideo(primaryVideo);
         setStreamUrl(getVideoStreamUrl(primaryVideo.video_id));
         setGeneralError(null);
@@ -115,6 +146,7 @@ export const App: React.FC = () => {
 
   // Handle Grab Trigger from LiveView
   const handleGrab = async (frameIndex: number): Promise<void> => {
+    if (grabBusyRef.current) return;
     if (!video) {
       setGrabError('비디오 메타데이터가 로드되지 않았습니다.');
       return;
@@ -126,7 +158,8 @@ export const App: React.FC = () => {
     }
 
     // CASE B: ROI is EDITING -> perform client-side Crop using existing frozen Capture PNG (DO NOT call server Grab API!)
-    if (roiState === 'EDITING') {
+    if (roiState === 'EDITING' && sameSource(capture, video) && capture?.frame_index === frameIndex) {
+      startSelection();
       // Validate ROI bounds & existing capture
       if (!capture || !imageBlobUrl) {
         setGrabError('기준 캡처 프레임이 유효하지 않습니다. 먼저 영상을 일시정지 후 다시 시도하세요.');
@@ -147,11 +180,14 @@ export const App: React.FC = () => {
       }
 
       setIsGrabbing(true);
+      grabBusyRef.current = true;
+      const epoch = ++grabEpochRef.current;
       setGrabError(null);
 
       try {
         const sourceImg = await loadImageFromUrl(imageBlobUrl);
         const { cropBlobUrl, imageData } = cropExactPixels(sourceImg, roi);
+        if (epoch !== grabEpochRef.current) { URL.revokeObjectURL(cropBlobUrl); return; }
 
         if (prevCropBlobUrlRef.current) {
           URL.revokeObjectURL(prevCropBlobUrlRef.current);
@@ -182,6 +218,7 @@ export const App: React.FC = () => {
         setGrabError(`Crop 적용 실패: ${err.message}`);
         // Maintain EDITING state on error
       } finally {
+        grabBusyRef.current = false;
         setIsGrabbing(false);
       }
       return;
@@ -191,15 +228,31 @@ export const App: React.FC = () => {
     if (roiState === 'APPLIED') {
       if (capture && capture.frame_index === frameIndex && cropData) {
         setCropMessage(
-          `현재 프레임 #${frameIndex}의 ROI Crop 결과가 유지되고 있습니다.`
+          `현재 녹화 프레임 #${frameIndex} 유지: 같은 프레임은 새 광학 정보가 아닙니다. 새 이미지 재검사는 다른 프레임을 선택하세요.`
         );
         return;
       }
     }
 
-    // CASE A: NO_ROI (or full frame grab) -> Call server Grab API
+    const frameKey = `${sourceKey(video)}:${frameIndex}`;
+    if (acquiredFramesRef.current.has(frameKey)) {
+      setGrabError('이미 획득한 녹화 프레임입니다. 새 Capture ID만 바꿔 재검사하지 않습니다. 다른 프레임을 선택하세요.');
+      return;
+    }
+    if (roiState !== 'NO_ROI' && !roiFits(roi, video)) {
+      setRoiState('NO_ROI');
+      setCropData(null);
+      setGrabError('ROI 좌표가 현재 원본 영상에 유효하지 않습니다. ROI를 다시 지정하세요.');
+      return;
+    }
+    startSelection();
+    setCropData(null);
+    setCropMessage(null);
     setIsGrabbing(true);
+    grabBusyRef.current = true;
+    const epoch = ++grabEpochRef.current;
     setGrabError(null);
+    let pendingBlobUrl: string | null = null;
 
     try {
       // 1. Call FastAPI Grab API with exact frame index and source revision
@@ -209,19 +262,34 @@ export const App: React.FC = () => {
         video.source_revision
       );
 
-      setCapture(captureResult);
+      if (!sameSource(captureResult, video) || captureResult.frame_index !== frameIndex) throw new Error('GRAB_SOURCE_MISMATCH');
 
       // 2. Fetch binary PNG image blob from CaptureStore
       const imageBlob = await fetchCaptureImageBlob(captureResult.capture_id);
-
-      // 3. Revoke previous blob url to prevent memory leak
-      if (prevBlobUrlRef.current) {
-        URL.revokeObjectURL(prevBlobUrlRef.current);
-      }
+      if (epoch !== grabEpochRef.current) return;
 
       const newBlobUrl = URL.createObjectURL(imageBlob);
+      pendingBlobUrl = newBlobUrl;
+      if (roiState !== 'NO_ROI') {
+        const sourceImage = await loadImageFromUrl(newBlobUrl);
+        const nextCrop = cropExactPixels(sourceImage, roi);
+        if (epoch !== grabEpochRef.current) {
+          URL.revokeObjectURL(nextCrop.cropBlobUrl); return;
+        }
+        if (prevCropBlobUrlRef.current) URL.revokeObjectURL(prevCropBlobUrlRef.current);
+        prevCropBlobUrlRef.current = nextCrop.cropBlobUrl;
+        setCropData({ ...nextCrop, roi: { ...roi }, width: roi.width, height: roi.height,
+          captureId: captureResult.capture_id, videoId: captureResult.video_id,
+          sourceRevision: captureResult.source_revision, frameIndex, createdAt: new Date().toISOString() });
+        setRoiState('APPLIED');
+        setCropMessage(`새 Capture #${frameIndex}에 기존 ROI ${roi.width}×${roi.height}px 적용. 병 전체 포함 여부를 확인하세요.`);
+      }
+      acquiredFramesRef.current.add(frameKey);
+      setCapture(captureResult);
+      if (prevBlobUrlRef.current) URL.revokeObjectURL(prevBlobUrlRef.current);
       prevBlobUrlRef.current = newBlobUrl;
       setImageBlobUrl(newBlobUrl);
+      pendingBlobUrl = null;
 
       // When grabbing full frame without applied ROI, clear previous cropData so ImageView shows Overview
       if (roiState === 'NO_ROI') {
@@ -247,6 +315,8 @@ export const App: React.FC = () => {
 
       setGrabError(userFriendlyMsg);
     } finally {
+      if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
+      grabBusyRef.current = false;
       setIsGrabbing(false);
     }
   };
@@ -259,13 +329,13 @@ export const App: React.FC = () => {
     }
 
     if (roiState === 'EDITING') {
-      // Turn off ROI editing
-      setRoiState('NO_ROI');
+      setRoiState('APPLIED');
       return;
     }
 
     if (roiState === 'APPLIED') {
-      // Transition from APPLIED back to EDITING
+      startSelection();
+      setCropData(null);
       setRoiState('EDITING');
       return;
     }
@@ -282,6 +352,8 @@ export const App: React.FC = () => {
 
   // Handle ROI modification (moving/resizing shifts APPLIED -> EDITING)
   const handleChangeRoi = (newRoi: RoiRect) => {
+    grabEpochRef.current++;
+    startSelection();
     setRoi(newRoi);
     if (roiState === 'APPLIED') {
       setRoiState('EDITING');
@@ -290,6 +362,8 @@ export const App: React.FC = () => {
 
   // Reset ROI to default centered rectangle & reset state to NO_ROI
   const handleResetRoi = () => {
+    grabEpochRef.current++;
+    startSelection();
     setRoi(DEFAULT_ROI);
     setRoiState('NO_ROI');
     setCropData(null);
@@ -373,17 +447,26 @@ export const App: React.FC = () => {
               cropData={cropData}
               isLoading={isGrabbing}
               error={grabError}
+              currentInspection={currentInspection}
             />
 
+            <div className="flex flex-col gap-4">
+            <GrabInspectionPanel crop={cropData} enabled={mode === 'MANUAL' && roiState === 'APPLIED' && !isGrabbing} manualMode={mode === 'MANUAL'}
+              onSelectionStart={startSelection} onInspectionChange={handleInspectionChange} />
+            <VisionReviewPanel inspection={currentInspection} />
             <InspectionPanel
               currentInspection={currentInspection}
-              onInspectionChange={setCurrentInspection}
+              onInspectionChange={handleInspectionChange}
+              onSelectionStart={startSelection}
+              getSelectionVersion={getSelectionVersion}
               onRunAgent={handleRunAgent}
             />
+            </div>
           </div>
 
           {/* 3. Bottom Full Width: AI Agent Diagnostic Panel */}
-          <AgentPanel inspectionId={currentInspection?.inspection_id || null} />
+          {currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' && <p className="text-xs text-amber-300">Grab 검사의 Gemini Live 분석 연결은 이번 단계에서 제외됩니다.</p>}
+          <AgentPanel inspectionId={currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' ? null : currentInspection?.inspection_id || null} />
         </div>
       </main>
     </div>

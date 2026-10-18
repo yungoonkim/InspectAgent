@@ -3,8 +3,13 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
+import ipaddress
+import os
 from typing import Annotated
 from uuid import uuid4
+
+logger = logging.getLogger("backend.agent.api")
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from google import genai
@@ -14,6 +19,11 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.agent.schemas import AnalysisError, AnalysisErrorResponse, AnalysisResponse, DiagnosisResult
 from backend.agent.service import AgentService, CORE_FIELDS, SUMMARY_TEXT
+from backend.agent.errors import AgentFailure
+from backend.agent.runtime_safety import (
+    API_VERSION, SDK_ATTEMPTS, SAFETY_REVISION, EXPECTED, AnalysisAdmission,
+    effective_configuration, verify_configuration,
+)
 from backend.agent.tools import INSPECTION_ID_PATTERN, InspectionTools, _valid_id
 from backend.config import Settings, get_settings
 from backend.storage import InspectionStorageBase, get_inspection_storage
@@ -25,6 +35,10 @@ ERROR_STATUS = {
     "MISSING_API_KEY": 503,
     "INVALID_MODEL_CONFIG": 503,
     "AGENT_CONFIG_CHANGED": 503,
+    "AGENT_RUNTIME_CONFIG_MISMATCH": 503,
+    "AGENT_ADMISSION_UNAVAILABLE": 503,
+    "AGENT_BUSY": 409,
+    "PROVIDER_REQUEST_LIMIT": 502,
     "STORAGE_ERROR": 503,
     "DATA_UNAVAILABLE": 503,
     "TOOL_CAPACITY_EXCEEDED": 503,
@@ -71,6 +85,7 @@ class AgentRuntime:
         self._client = None
         self._configuration = None
         self._close_timeout = 15
+        self.admission = AnalysisAdmission()
 
     async def service(self, tools: InspectionTools, settings: Settings) -> AgentService:
         if not settings.GEMINI_API_KEY:
@@ -84,11 +99,13 @@ class AgentRuntime:
                     self._client = genai.Client(
                         api_key=settings.GEMINI_API_KEY,
                         http_options=types.HttpOptions(
+                            api_version=API_VERSION,
                             timeout=int(settings.AGENT_MODEL_TIMEOUT_SECONDS * 1000),
-                            retry_options=types.HttpRetryOptions(attempts=1),
+                            retry_options=types.HttpRetryOptions(attempts=SDK_ATTEMPTS),
                         ),
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.error("Failed to initialize genai.Client: exception_class=%s", exc.__class__.__name__)
                     analysis_error("INVALID_MODEL_CONFIG")
                 self._configuration = configuration
                 self._close_timeout = settings.AGENT_MODEL_TIMEOUT_SECONDS
@@ -158,7 +175,12 @@ async def get_agent_service(
         runtime = AgentRuntime()
         request.app.state.agent_runtime = runtime
     try:
+        candidate = AgentService(context.tools, settings=settings)
+        if settings.GEMINI_API_KEY:
+            verify_configuration(settings, candidate.limits)
         return await runtime.service(context.tools, settings)
+    except AgentFailure as failure:
+        analysis_error(failure.code)
     except HTTPException:
         raise
     except Exception:
@@ -168,8 +190,46 @@ async def get_agent_service(
 router = APIRouter(tags=["Agent analysis"])
 
 
+async def analysis_admission(request: Request):
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is None:
+        runtime = AgentRuntime()
+        request.app.state.agent_runtime = runtime
+    try:
+        with runtime.admission.acquire():
+            yield
+    except AgentFailure as failure:
+        analysis_error(failure.code)
+
+
+@router.get("/agent/runtime-safety", include_in_schema=False)
+async def runtime_safety(request: Request, settings: Settings = Depends(get_settings)):
+    try:
+        local_peer = request.client is not None and ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        local_peer = False
+    if not local_peer or request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise HTTPException(status_code=404, detail="Not found")
+    candidate = AgentService(None, settings=settings)
+    configuration = effective_configuration(settings, candidate.limits)
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    return {
+        "safety_revision": SAFETY_REVISION, "pid": os.getpid(),
+        "effective": configuration, "expected": EXPECTED,
+        "configuration_matches": configuration == EXPECTED,
+        "credentials_configured": bool(settings.GEMINI_API_KEY),
+        "client_initialized": runtime is not None and runtime._client is not None,
+        "client_configuration_matches": runtime is None or runtime._client is None or runtime._configuration == (
+            settings.GEMINI_API_KEY, settings.AGENT_MODEL_TIMEOUT_SECONDS,
+        ),
+        "worker_count": "UNKNOWN", "protection": "OS_FILE_LOCK_SAME_CHECKOUT_AND_TEMP_NAMESPACE",
+        "public_deployment_supported": False,
+    }
+
+
 @router.post(
     "/analyze/{inspection_id}", response_model=AnalysisResponse,
+    dependencies=[Depends(analysis_admission)],
     summary="Analyze an existing inspection without changing its verdict",
     description=(
         "Read-only post-inspection diagnosis using stored results and logs. "
@@ -177,7 +237,7 @@ router = APIRouter(tags=["Agent analysis"])
         "reload an image or run PatchCore. Gemini configuration is required only for analysis requests."
     ),
     responses={status: {"model": AnalysisErrorResponse, "description": description} for status, description in {
-        404: "Inspection not found", 422: "Invalid inspection identifier",
+        404: "Inspection not found", 409: "Another analysis is in progress", 422: "Invalid inspection identifier",
         500: "Unexpected internal failure", 502: "Agent service or validated output failure",
         503: "Agent configuration, storage or tool unavailable", 504: "Analysis or dependency timeout",
     }.items()},
@@ -196,6 +256,10 @@ async def analyze_inspection(
     except Exception:
         analysis_error("AGENT_INTERNAL_ERROR")
     if result.analysis_status != "COMPLETED":
+        logger.warning(
+            "Agent analysis completed with failure: inspection_id=%s, error_code=%s, model_name=%s",
+            context.inspection_id, result.error_code, result.model_name,
+        )
         analysis_error(result.error_code)
     if result.error_code is not None or result.inspection_id != context.inspection_id:
         analysis_error("EVIDENCE_MISMATCH")

@@ -1,5 +1,36 @@
 # Vision 검사 데이터 스키마 및 식별자 명세 (`docs/inspection-data-schema.md`)
 
+> Day 7 Step 8: MANUAL Grab 재검사는 별도 영속 `RIG-<uuid hex>` 그룹으로 최초 1회 + 추가 2회를 관리합니다.
+> 기존 `POST /captures/{capture_id}/inspect`에 선택 필드 `group_id`, `parent_inspection_id`,
+> `expected_version`, `same_product_confirmed`, `request_id`가 추가됐습니다. 재검사는 새 Capture와
+> 명시적인 동일 제품 확인 및 현재 그룹 버전/parent 일치가 필요합니다. 같은 product_id만으로 물리적 동일성을 보장하지 않습니다.
+> 새 검사에만 `metrics.reinspection`과 `metrics.input_provenance.reinspection` 링크를 저장하며 과거 JSONL은 수정하지 않습니다.
+> `GET /reinspection-groups/{group_id}`, `GET /reinspection-groups/by-capture/{capture_id}`는 세션 소유 범위에서 읽기만 합니다.
+> `POST /reinspection-groups/{group_id}/manual-reviews`는 `expected_version`, UUID hex `request_id`,
+> `result`(HOLD/MANUAL_OK/MANUAL_NG), 비어 있지 않은 `operator_id`, `reason`을 받습니다.
+> 수동 결과는 자기신고 개발용 확인 기록이며 인증된 품질 승인이 아닙니다. 원본 final_result를 변경하지 않습니다.
+> [구현·오류·수명·검증 계약](day7-step8-reinspection-workflow-and-manual-review.md#t-재개-구현-완료-기록)을 참조하세요.
+
+> Day 7 Step 9 오프라인 Vision API: `GET /inspections/{inspection_id}/vision-review`는
+> 현재 세션이 소유한 `LIVEVIEW_GRAB` + `REINSPECT` 검사에 연결된 저장 보조 의견을 읽습니다.
+> 세션 cookie 및 서버가 관리하는 영속 Crop PNG 접근 권한이 필요합니다. 결과가 없으면
+> `available=false`, 저장 결과가 있으면 `available=true`이며 응답은 `{available, review, capabilities}`입니다.
+> GET은 분석을 실행하지 않습니다.
+>
+> `POST` 같은 경로의 본문은 `{ "request_id": "32자리 소문자 UUID hex" }`만 허용합니다.
+> 서버는 Origin/CSRF, 세션 소유권, LIVEVIEW_GRAB/REINSPECT, Crop PNG 형식·크기·채널·SHA256,
+> 검사 provenance 및 재검사 그룹 연결을 검증합니다. 클라이언트 이미지/URL/파일 경로는 받지 않습니다.
+> 현재 기본 동작은 **403 `VISION_LIVE_DISABLED`**이며 실제 Provider 전송 어댑터는 구현되지 않았습니다.
+> 명시적으로 주입한 테스트 Fake만 `analysis_mode=FAKE_TEST` 기록을 만들 수 있습니다.
+>
+> 결과 의견은 `DEFECT_SUSPECTED`, `QUALITY_ISSUE`, `NO_VISIBLE_DEFECT`, `INCONCLUSIVE`,
+> 서버 실패 기록은 `ANALYSIS_FAILED`입니다. 이 값은 PatchCore 최종 판정이나 작업자 확인 결과가 아닙니다.
+> 별도 `OUTPUT_DIR/vision_reviews/state.json`에 검사/Capture/그룹 및 Crop SHA256을 연결합니다.
+> 검사당 1회, UTC 일일 10회 시도, 128개 기록 상한과 파일 OS Lock을 적용하고,
+> 호출 전 PENDING 예약으로 불확실 상태의 자동 재호출을 차단합니다.
+> 후보 모델/API, Provider 실제 재전송 횟수, 과금은 검증되지 않아 LIVE는 비활성입니다.
+> [Step 9 구현·검증·한계](day7-step9-gemini-vision-offline-integration.md)를 참조하세요.
+
 > Day5 Step3 B-1-DB: ROI preset/version/명시 승인/활성 binding은 PostgreSQL에서 관리합니다.
 > [ROI 관리 API 계약](roi-postgresql-api.md)을 참조하세요. 캡처 세션과 관리 Bearer는 별개이며,
 > Draft 저장은 AUTO 승인·활성화가 아닙니다. 기존 검사/Agent JSONL 스키마는 변경하지 않았습니다.

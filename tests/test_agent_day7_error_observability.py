@@ -37,6 +37,10 @@ from tests.test_agent_service import normal_responses, service_for
 from tests.test_agent_tools import make_log, make_record
 
 
+def _synthetic_google_key():
+    return "AIzaSy" + ("A" * 33)
+
+
 @pytest.fixture(autouse=True)
 def forbid_live_gemini():
     with patch("backend.agent.service.genai.Client", side_effect=AssertionError("Live Gemini forbidden")):
@@ -80,9 +84,12 @@ def harness(tmp_path, monkeypatch):
 
 def test_helper_sanitization_and_status_extraction():
     # Sensitive credential redaction
-    raw_message = "Error at https://api.google.com?key=AIzaSyD12345678901234567890123456789012 with Bearer secret_token_xyz"
+    synthetic_key = _synthetic_google_key()
+    raw_message = f"Error at https://api.google.com?key={synthetic_key} with Bearer secret_token_xyz"
     sanitized = _sanitize_error_message(raw_message)
+    prefix_sanitized = _sanitize_error_message(f"Credential {synthetic_key}")
     assert "AIzaSy" not in sanitized
+    assert "AIzaSy" not in prefix_sanitized
     assert "secret_token" not in sanitized
     assert "[REDACTED]" in sanitized
 
@@ -124,7 +131,7 @@ def test_normal_response_mock_flow(harness):
 def test_provider_http_errors_safely_logged_and_mapped_to_502(
     harness, caplog, status_code, status_str, msg_prefix
 ):
-    fake_secret = "AIzaSySecretApiKey12345678901234567890"
+    fake_secret = _synthetic_google_key()
     failure = errors.ClientError(
         status_code,
         {"error": {"code": status_code, "status": status_str, "message": f"{msg_prefix}: key={fake_secret}"}},

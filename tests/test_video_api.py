@@ -232,7 +232,7 @@ def test_real_approved_video_and_main_router(tmp_path):
     approved = PROJECT_ROOT / "data/outputs/videos" / DEMO_VIDEO.relative_path
     if not approved.exists():
         pytest.skip("Approved H.264 demo file is not installed; synthetic security/API tests remain independent")
-    runtime = VideoRuntime(Settings(_env_file=None, CAPTURE_DIR=str(tmp_path / "captures")))
+    runtime = VideoRuntime(Settings(_env_file=None, VIDEO_ROOT=str(approved.parent), CAPTURE_DIR=str(tmp_path / "captures")))
     clock = [time.time()]
     runtime.captures.clock = lambda: clock[0]
     app.dependency_overrides[get_video_runtime] = lambda: runtime
@@ -243,24 +243,36 @@ def test_real_approved_video_and_main_router(tmp_path):
         assert metadata["width"] == 1920 and metadata["height"] == 480
         assert metadata["codec"] == "h264"
         assert client.get("/health").status_code == 200
-        stream = "/videos/VID-000001/stream"
+        assert metadata["video_id"] == DEMO_VIDEO.video_id
+        stream = metadata["stream_url"]
         assert client.get(stream).content == approved.read_bytes()
         assert int(client.head(stream).headers["content-length"]) == approved.stat().st_size
         assert client.get(stream, headers={"Range": "bytes=0-31"}).status_code == 206
         assert client.get(stream, headers={"Range": f"bytes={approved.stat().st_size}-"}).status_code == 416
         headers = bootstrap(client)
         for frame_index in (0, 120, 239):
-            response = client.post("/videos/VID-000001/grab", headers=headers, json={"frame_index": frame_index, "source_revision": DEMO_VIDEO.source_revision})
+            response = client.post(f"/videos/{DEMO_VIDEO.video_id}/grab", headers=headers, json={"frame_index": frame_index, "source_revision": DEMO_VIDEO.source_revision})
             assert response.status_code == 201
             captured = response.json()
             assert captured["frame_timestamp_ms"] == frame_index / 30 * 1000
             png = client.get(captured["image_url"])
-            reference, information = runtime.source.grab_frame("VID-000001", frame_index, DEMO_VIDEO.source_revision)
+            reference, information = runtime.source.grab_frame(DEMO_VIDEO.video_id, frame_index, DEMO_VIDEO.source_revision)
+            assert captured["video_id"] == DEMO_VIDEO.video_id
+            assert captured["source_revision"] == metadata["source_revision"]
             assert np.array_equal(cv2.imdecode(np.frombuffer(png.content, np.uint8), cv2.IMREAD_COLOR), reference)
+            direct = cv2.VideoCapture(str(approved))
+            try:
+                for _index in range(frame_index + 1):
+                    available, expected_frame = direct.read()
+                    assert available
+            finally:
+                direct.release()
+            assert np.array_equal(reference, expected_frame)
+            assert np.array_equal(reference[121:399, 1014:1305], expected_frame[121:399, 1014:1305])
             assert "inspection_id" not in captured
         for frame_index, revision, expected in [(240, DEMO_VIDEO.source_revision, 422), (120, "0" * 64, 409)]:
             before = len(runtime.captures._captures)
-            assert client.post("/videos/VID-000001/grab", headers=headers, json={"frame_index": frame_index, "source_revision": revision}).status_code == expected
+            assert client.post(f"/videos/{DEMO_VIDEO.video_id}/grab", headers=headers, json={"frame_index": frame_index, "source_revision": revision}).status_code == expected
             assert len(runtime.captures._captures) == before
         stranger = TestClient(app)
         try:

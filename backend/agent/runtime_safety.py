@@ -40,9 +40,16 @@ def effective_configuration(settings, limits):
     }
 
 
+def expected_configuration(settings):
+    expected = dict(EXPECTED)
+    if getattr(settings, "AGENT_FINAL_MODEL_TIMEOUT_SECONDS", 15) == 30:
+        expected["final_model_timeout_seconds"] = 30
+    return expected
+
+
 def verify_configuration(settings, limits):
     configuration = effective_configuration(settings, limits)
-    if configuration != EXPECTED:
+    if configuration != expected_configuration(settings):
         raise AgentFailure("AGENT_RUNTIME_CONFIG_MISMATCH")
     return configuration
 

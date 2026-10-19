@@ -19,7 +19,7 @@ interface AgentPanelProps {
 
 export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
   const [prevPropId, setPrevPropId] = useState<string | null>(inspectionId);
-  const [activeInspectionId, setActiveInspectionId] = useState<string>(inspectionId || 'INSP-001396');
+  const [activeInspectionId, setActiveInspectionId] = useState<string>(inspectionId || '');
   const [loadedReport, setReport] = useState<AgentReport | null>(null);
   const [reportOrigin, setReportOrigin] = useState<'STORED' | 'LIVE'>('STORED');
   const [liveState, setLiveState] = useState<{id:string; status:LiveAnalysisStatus} | null>(null);
@@ -38,9 +38,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
   // Sync state if inspectionId prop changed
   if (inspectionId !== prevPropId) {
     setPrevPropId(inspectionId);
-    if (inspectionId) {
-      setActiveInspectionId(inspectionId);
-    }
+    setActiveInspectionId(inspectionId || '');
   }
 
   // Confirmation Modal state
@@ -79,8 +77,13 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
 
   // Fetch report on mount or when inspectionId prop changes
   useEffect(() => {
-    const target = inspectionId || 'INSP-001396';
-    void fetchStoredReport(target);
+    if (inspectionId) void fetchStoredReport(inspectionId);
+    else {
+      requestVersion.current += 1;
+      setReport(null);
+      setError(null);
+      setIsLoadingStored(false);
+    }
   }, [inspectionId, fetchStoredReport]);
 
   // Handle Escape key to close modal
@@ -112,11 +115,9 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
     try {
       const res = await runAgentAnalysis(target);
       if (!isCurrent()) return;
-      if (res.inspection_id !== target || res.analysis_status !== 'COMPLETED') throw new Error('AGENT_RESPONSE_INVALID');
-      setReport({
-        ...res,
-        provenance: 'LIVE_AGENT_ANALYSIS',
-      });
+      if (res.inspection_id !== target || res.analysis_status !== 'COMPLETED'
+        || !['LIVE_AGENT_ANALYSIS', 'FAKE_TEST'].includes(res.provenance ?? '')) throw new Error('AGENT_RESPONSE_INVALID');
+      setReport(res);
       setReportOrigin('LIVE');
       setLiveState({id:target, status:'COMPLETED'});
     } catch (err: any) {
@@ -140,8 +141,8 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="phase-badge font-mono" data-agent-live-status={liveStatus}>{liveAnalysisLabel(liveStatus)}</span>
-          {report?.provenance === 'RECORDED_TEST_FIXTURE' ? (
+          <span className="phase-badge font-mono" data-agent-live-status={liveStatus}>{report?.provenance === 'FAKE_TEST' ? 'FAKE_TEST · LIVE 미검증' : liveAnalysisLabel(liveStatus)}</span>
+          {report?.provenance === 'FAKE_TEST' ? <span>FAKE_TEST · 실제 Gemini 분석 아님</span> : report?.provenance === 'RECORDED_TEST_FIXTURE' ? (
             <span className="text-xs bg-amber-500/15 text-amber border border-amber-500/30 px-2.5 py-0.5 rounded-full font-mono font-medium">
               RECORDED TEST FIXTURE (검증된 근거)
             </span>
@@ -175,6 +176,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
             <input
               type="text"
               value={activeInspectionId}
+              readOnly={!!inspectionId}
               onChange={(e) => setActiveInspectionId(e.target.value)}
               placeholder="INSP-001396"
               className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono focus:border-indigo-400 focus:outline-none w-44"
@@ -195,7 +197,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ inspectionId }) => {
             <button
               type="button"
               onClick={() => setShowConfirmModal(true)}
-              disabled={isAnalyzingLive || !activeInspectionId.trim()}
+              disabled={isAnalyzingLive || !!report || !activeInspectionId.trim()}
               className="btn text-xs px-3.5 py-1.5 flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-medium rounded-lg shadow-lg shadow-indigo-500/20"
               title="현재 검사에 대해 Gemini AI Function Calling 진단을 새로 실행합니다"
             >

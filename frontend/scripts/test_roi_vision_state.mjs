@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sourceKey, sameSource, roiFits } from '../src/utils/roiLifetime.ts';
-import { visionInputKey, matchesVisionInput } from '../src/utils/visionReviewState.ts';
+import { canRequestVisionReview, visionInputKey, matchesVisionInput } from '../src/utils/visionReviewState.ts';
 
 const video = { video_id: 'VID-000001', source_revision: 'a'.repeat(64), width: 1920, height: 480 };
 const roi = { x: 800, y: 80, width: 320, height: 320 };
@@ -25,7 +25,19 @@ test('ROI validation uses strict original half-open pixel bounds', () => {
 });
 const inspection = { inspection_id:'INSP-MOCK-A', final_result:'REINSPECT',metrics:{input_source:'LIVEVIEW_GRAB',
   reinspection:{group_id:'RIG-MOCK'},input_provenance:{capture_id:'CAP-MOCK',crop_sha256:'a'.repeat(64)}} };
-const review = {inspection_id:inspection.inspection_id,capture_id:'CAP-MOCK',image_sha256:'a'.repeat(64),reinspection_group_id:'RIG-MOCK',analysis_mode:'FAKE_TEST'};
+const review = {inspection_id:inspection.inspection_id,capture_id:'CAP-MOCK',image_sha256:'a'.repeat(64),reinspection_group_id:'RIG-MOCK',analysis_mode:'FAKE_TEST',
+  prompt_version:'bottle-independent-vision-v1',classification:'INCONCLUSIVE'};
+
+test('Vision requests require server enablement, explicit live consent and no previous review', () => {
+  const disabled = {available:false, review:null, capabilities:{enabled:false,live_enabled:false,result_contract:'VISION_JUDGE_A_V1',consent_policy:'PER_REQUEST_CROP_V1'}};
+  assert.equal(canRequestVisionReview(undefined,true),false);
+  assert.equal(canRequestVisionReview(disabled,true),false);
+  const live = {...disabled,capabilities:{...disabled.capabilities,enabled:true,live_enabled:true}};
+  assert.equal(canRequestVisionReview(live,false),false);
+  assert.equal(canRequestVisionReview(live,true),true);
+  assert.equal(canRequestVisionReview({...live,available:true},true),false);
+  assert.equal(canRequestVisionReview({...disabled,capabilities:{...disabled.capabilities,enabled:true,live_enabled:false}},false),true);
+});
 test('only eligible Grab REINSPECT has a Vision source key', () => {
   assert.ok(visionInputKey(inspection));
   assert.equal(visionInputKey(null),'');

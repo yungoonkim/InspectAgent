@@ -156,6 +156,7 @@ class DiagnosisResult(StrictModel):
 
 
 class AnalysisResponse(DiagnosisResult):
+    provenance: Literal["LIVE_AGENT_ANALYSIS", "FAKE_TEST"] = "FAKE_TEST"
     analysis_id: str = Field(pattern=r"^ANALYSIS-[0-9a-f]{32}$")
     inspection_result: Optional[Literal["OK", "NG", "UNKNOWN"]] = None
     final_result: Optional[Literal["OK", "NG", "REINSPECT", "ERROR"]] = None

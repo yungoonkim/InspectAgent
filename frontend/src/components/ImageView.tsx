@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   Image as ImageIcon,
   CheckCircle2,
@@ -18,6 +18,8 @@ import type { CaptureMetadata } from '../types/video';
 import type { CropData, PixelInspectionInfo } from '../types/roi';
 import type { InspectionResponse } from '../types/inspection';
 import { computeGrayValue } from '../utils/coordinateTransforms';
+import { detectBottleEdges, drawBottleEdges } from '../utils/bottleEdges';
+import { BottleEdgeDetails } from './BottleEdgeDetails';
 import {
   getInspectionImageUrl,
   getGrabInspectionImageUrl,
@@ -147,6 +149,13 @@ export const ImageView: React.FC<ImageViewProps> = ({
   const anomalyMapStatus = !currentInspection ? 'IDLE' : isMockFixture ? 'NOT_AVAILABLE' :
     !isHeatmapCurrent ? 'LOADING' : heatmapState?.status === 'AVAILABLE' && !isHeatmapReady
       ? staticImg ? 'NOT_AVAILABLE' : 'LOADING' : heatmapState?.status;
+
+  const [showBottleEdges, setShowBottleEdges] = useState(false);
+  const edgePixels = activeSource === 'REGISTERED'
+    ? currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' ? staticImg?.imageData ?? null : null
+    : captureViewMode === 'focus' && cropData && cropImgElement?.src === cropData.cropBlobUrl ? cropData.imageData : null;
+  const bottleEdges = useMemo(() => showBottleEdges && edgePixels ? detectBottleEdges(edgePixels) : null,
+    [showBottleEdges, edgePixels]);
 
   // 1. Load LiveView Crop Image element when cropData changes and reset to 100% center
   useEffect(() => {
@@ -424,6 +433,8 @@ export const ImageView: React.FC<ImageViewProps> = ({
       ctx.restore();
     }
 
+    if (bottleEdges && edgePixels === targetImageData) drawBottleEdges(ctx, bottleEdges, originX, originY, zoom);
+
     // Subtle crop / image boundary outline
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 1;
@@ -535,6 +546,8 @@ export const ImageView: React.FC<ImageViewProps> = ({
     showHeatmap,
     overlayImgElement,
     heatmapOpacity,
+    bottleEdges,
+    edgePixels,
   ]);
 
   // Zoom handlers with strict [1.0, 40.0] bounds and viewport-center scaling
@@ -929,6 +942,14 @@ export const ImageView: React.FC<ImageViewProps> = ({
                 </div>
 
                 {/* Day 7 Step 4: Heatmap Controls for REGISTERED inspection images */}
+                <div className="toolbar-group">
+                  <button type="button" className={`btn-tool ${showBottleEdges ? 'active-tool' : ''}`}
+                    disabled={!edgePixels} aria-pressed={showBottleEdges}
+                    onClick={() => setShowBottleEdges(value => !value)}
+                    title="원본 Grab Crop 픽셀의 실험용 윤곽 표시 · 모델 판정과 무관">
+                    병 테두리 {showBottleEdges ? 'ON' : 'OFF'}
+                  </button>
+                </div>
                 {activeSource === 'REGISTERED' && isInspectionSynced && (
                   <div className="toolbar-group heatmap-toolbar-group">
                     <button
@@ -974,6 +995,8 @@ export const ImageView: React.FC<ImageViewProps> = ({
                   </div>
                 )}
               </div>
+
+              {bottleEdges && <BottleEdgeDetails edges={bottleEdges} />}
 
               {/* 600x600 Fixed Viewport with non-passive wheel prevention */}
               <div ref={canvasWrapperRef} className="canvas-scroll-wrapper">

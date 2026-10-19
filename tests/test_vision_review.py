@@ -24,7 +24,8 @@ class FakeVisionClient:
     def __init__(self):
         self.aio = SimpleNamespace(models=self)
         self.calls = []
-        self.text = json.dumps({"classification": "QUALITY_ISSUE", "visible_observations": ["MOCK TEST: low contrast"],
+        self.text = json.dumps({"judge_verdict": "REINSPECT", "visible_observations": ["MOCK TEST: low contrast"],
+            "defect_locations": [], "judge_rationale": "MOCK TEST: insufficient image information",
             "limitations": ["Synthetic fixture; not a product evaluation"], "recommended_operator_action": "Human check only"})
         self.error = None
         self.finish_reason = None
@@ -56,13 +57,15 @@ def vision(harness, monkeypatch):
 
 
 def post(vision, request_id=None, **extra):
-    return vision.h.client.post(vision.endpoint, json={"request_id": request_id or uuid4().hex, **extra})
+    return vision.h.client.post(vision.endpoint, json={"request_id": request_id or uuid4().hex,
+        "confirm_external_transmission": True, **extra})
 
 
-@pytest.mark.parametrize("classification", ["DEFECT_SUSPECTED", "QUALITY_ISSUE", "NO_VISIBLE_DEFECT", "INCONCLUSIVE"])
-def test_verified_png_is_the_only_image_part_and_classification_is_not_engine_verdict(vision, classification):
+@pytest.mark.parametrize("verdict", ["OK", "NG", "REINSPECT"])
+def test_verified_png_is_the_only_image_part_and_judge_is_not_engine_verdict(vision, verdict):
     value = json.loads(vision.fake.text)
-    value["classification"] = classification
+    value["judge_verdict"] = verdict
+    value["defect_locations"] = ["MOCK TEST: upper rim"] if verdict == "NG" else []
     vision.fake.text = json.dumps(value)
     before = {name: (vision.h.directory / name).read_bytes() for name in ("inspections.jsonl", "logs.jsonl")}
     group_before = (vision.h.runtime.reinspections.root / "state.json").read_bytes()
@@ -70,7 +73,9 @@ def test_verified_png_is_the_only_image_part_and_classification_is_not_engine_ve
     assert result.status_code == 200, result.text
     body = result.json()
     saved = body["review"]
-    assert saved["classification"] == classification and saved["analysis_mode"] == "FAKE_TEST"
+    assert saved["judge_verdict"] == verdict and saved["analysis_mode"] == "FAKE_TEST"
+    assert saved["analysis_status"] == "COMPLETED" and "classification" not in saved
+    assert saved["image_id"] == vision.record["image_id"]
     assert saved["inspection_id"] == vision.record["inspection_id"]
     assert saved["model_requested"] == "gemini-4-argon" and saved["model_resolved"] == "MOCK_MODEL_ONLY"
     assert body["capabilities"]["live_enabled"] is False
@@ -80,7 +85,7 @@ def test_verified_png_is_the_only_image_part_and_classification_is_not_engine_ve
     expected = (vision.h.directory / "inputs" / f'{vision.record["image_id"]}.png').read_bytes()
     assert parts[1] == {"inline_data": {"mime_type": "image/png", "data": expected}}
     assert saved["image_sha256"] == hashlib.sha256(expected).hexdigest()
-    for forbidden in ("34.1442", vision.record["inspection_id"], "REINSPECT", "anomaly_score", "input_provenance"):
+    for forbidden in ("34.1442", vision.record["inspection_id"], "anomaly_score", "input_provenance"):
         assert forbidden not in parts[0]["text"]
     for name, raw in before.items(): assert (vision.h.directory / name).read_bytes() == raw
     assert (vision.h.runtime.reinspections.root / "state.json").read_bytes() == group_before
@@ -92,7 +97,8 @@ def test_verified_png_is_the_only_image_part_and_classification_is_not_engine_ve
 def test_invalid_response_is_persisted_failure_not_fabricated_success(vision, value):
     vision.fake.text = value
     result = post(vision).json()["review"]
-    assert result["classification"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_INVALID_RESPONSE"
+    assert result["analysis_status"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_INVALID_RESPONSE"
+    assert result["judge_verdict"] is None
     assert result["visible_observations"] == []
 
 
@@ -105,7 +111,8 @@ def test_failure_never_retries_or_changes_verdict(vision, kind, expected):
     if kind == "tokens": vision.fake.finish_reason = "MAX_TOKENS"
     if kind == "oversize": vision.fake.text = "x" * 33000
     result = post(vision)
-    assert result.json()["review"]["classification"] == "ANALYSIS_FAILED"
+    assert result.json()["review"]["analysis_status"] == "ANALYSIS_FAILED"
+    assert result.json()["review"]["judge_verdict"] is None
     assert result.json()["review"]["failure_code"] == expected
     assert "PRIVATE_CREDENTIAL" not in result.text and len(vision.fake.calls) == 1
     assert vision.h.storage.get_inspection(vision.record["inspection_id"]).final_result == "REINSPECT"
@@ -117,7 +124,8 @@ def test_default_disabled_even_with_enable_environment_flag(vision, monkeypatch)
     monkeypatch.setattr(main.app.state, "vision_review_service", service)
     state = vision.h.client.get(vision.endpoint).json()
     assert state["capabilities"]["enabled"] is False and state["capabilities"]["live_enabled"] is False
-    assert state["capabilities"]["model_support"] == "UNKNOWN"
+    assert state["capabilities"]["model_support"] == "DOCUMENTED_IMAGE_AND_JSON"
+    assert state["capabilities"]["account_access"] == "NOT_TESTED"
     assert post(vision).status_code == 403 and len(vision.fake.calls) == 0
     assert not service.files.root.exists()
 
@@ -199,7 +207,7 @@ def test_other_inspection_cannot_reuse_request_id_or_image(vision):
     request_id = uuid4().hex
     post(vision,request_id)
     other = first_warning(vision.h)
-    response = vision.h.client.post(f'/inspections/{other["inspection_id"]}/vision-review',json={"request_id":request_id})
+    response = vision.h.client.post(f'/inspections/{other["inspection_id"]}/vision-review',json={"request_id":request_id,"confirm_external_transmission":True})
     assert response.status_code == 409 and len(vision.fake.calls) == 1
 
 
@@ -219,7 +227,7 @@ def test_actual_wait_for_timeout_has_no_automatic_resend(vision):
     vision.service.policy = VisionPolicy(timeout_seconds=0.01)
     vision.fake.block = True
     result = post(vision).json()["review"]
-    assert result["classification"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_TIMEOUT"
+    assert result["analysis_status"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_TIMEOUT"
     assert len(vision.fake.calls) == 1
 
 
@@ -227,14 +235,14 @@ def test_changed_image_after_response_is_not_published_as_valid(vision):
     path = vision.h.directory / "inputs" / f'{vision.record["image_id"]}.png'
     vision.fake.mutate = lambda: path.write_bytes(b"changed during fake response")
     result = post(vision).json()["review"]
-    assert result["classification"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_INPUT_CHANGED"
+    assert result["analysis_status"] == "ANALYSIS_FAILED" and result["failure_code"] == "VISION_INPUT_CHANGED"
 
 
 def test_daily_attempt_limit_is_persistent(vision):
     vision.service.policy = VisionPolicy(daily_limit=1)
     post(vision)
     other = first_warning(vision.h)
-    assert vision.h.client.post(f'/inspections/{other["inspection_id"]}/vision-review',json={"request_id":uuid4().hex}).status_code == 429
+    assert vision.h.client.post(f'/inspections/{other["inspection_id"]}/vision-review',json={"request_id":uuid4().hex,"confirm_external_transmission":True}).status_code == 429
     assert len(vision.fake.calls) == 1
 
 
@@ -243,7 +251,7 @@ def test_existing_manual_review_and_group_are_byte_unchanged(vision):
     assert manual_review(vision.h,group,"MANUAL_NG").status_code == 200
     before = (vision.h.runtime.reinspections.root / "state.json").read_bytes()
     identifier = group["attempts"][-1]["inspection_id"]
-    assert vision.h.client.post(f'/inspections/{identifier}/vision-review',json={"request_id":uuid4().hex}).status_code == 200
+    assert vision.h.client.post(f'/inspections/{identifier}/vision-review',json={"request_id":uuid4().hex,"confirm_external_transmission":True}).status_code == 200
     assert (vision.h.runtime.reinspections.root / "state.json").read_bytes() == before
 
 
@@ -255,10 +263,10 @@ def test_cancellation_leaves_uncertain_reservation_no_second_sdk_call(vision):
     request_id = uuid4().hex
     vision.fake.error = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(vision.service.create(owner,image,raw,request_id,lambda:image))
+        asyncio.run(vision.service.create(owner,image,raw,request_id,lambda:image,confirmed=True))
     with pytest.raises(VisionReviewError,match="VISION_RESULT_UNCERTAIN"):
-        asyncio.run(vision.service.create(owner,image,raw,request_id,lambda:image))
-    assert vision.service.get(owner,image)["classification"] == "ANALYSIS_FAILED"
+        asyncio.run(vision.service.create(owner,image,raw,request_id,lambda:image,confirmed=True))
+    assert vision.service.get(owner,image)["analysis_status"] == "ANALYSIS_FAILED"
     assert len(vision.fake.calls) == 1
 
 
@@ -271,4 +279,19 @@ def test_persisted_result_is_revalidated_not_trusted_as_live(vision, change):
     target.write_text(json.dumps(state),encoding='utf-8')
     result = vision.h.client.get(vision.endpoint)
     assert result.status_code == 503 and result.json()["detail"]["error_code"] == "VISION_INVALID_STORED_REVIEW"
+    assert len(vision.fake.calls) == 1
+
+
+def test_synthetic_stored_live_fixture_is_readable_when_new_live_is_disabled(vision, monkeypatch):
+    assert post(vision).status_code == 200
+    target = vision.service.files.root / "state.json"
+    state = json.loads(target.read_text(encoding="utf-8"))
+    entry = state["reviews"][vision.record["inspection_id"]]
+    entry["analysis_mode"] = entry["review"]["analysis_mode"] = "LIVE"
+    entry["review"]["http_attempts"] = 1
+    target.write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setattr(main.app.state, "vision_review_service", VisionReviewService(vision.service.files.root))
+    response = vision.h.client.get(vision.endpoint)
+    assert response.status_code == 200 and response.json()["review"]["analysis_mode"] == "LIVE"
+    assert not response.json()["capabilities"]["enabled"]
     assert len(vision.fake.calls) == 1

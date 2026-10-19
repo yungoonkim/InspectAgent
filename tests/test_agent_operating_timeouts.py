@@ -115,7 +115,7 @@ def test_investigation_is_not_extended_or_sent_beyond_remaining_time():
             service._request_timeout_seconds(RequestState("INSP-000001", deadline=114), False)
 
 
-def test_final_sdk_server_504_keeps_safe_http_mapping_and_no_retry():
+def test_final_sdk_server_504_keeps_safe_http_mapping_and_no_retry(caplog):
     failure = errors.ServerError(504, {"error": {"status": "DEADLINE_EXCEEDED", "message": "PRIVATE"}})
     service, generator = service_for(warning_storage(), [*calls(), failure], AgentLimits(final_model_timeout_seconds=30))
     result = asyncio.run(service.analyze("INSP-000001"))
@@ -125,6 +125,12 @@ def test_final_sdk_server_504_keeps_safe_http_mapping_and_no_retry():
     assert history.origin == "BACKEND_POLICY" and history.executed and history.error_code == "DATA_UNAVAILABLE"
     assert not history.success and history.evidence_id is None
     assert generator.call_args.kwargs["config"].http_options.timeout == 30000
+    assert "stage=STRUCTURED_REPORT" in caplog.text
+    assert "exception_class=ServerError" in caplog.text
+    assert "http_status=504" in caplog.text
+    assert "provider_code=DEADLINE_EXCEEDED" in caplog.text
+    assert "provider_request_number=3" in caplog.text
+    assert "PRIVATE" not in caplog.text
     assert "PRIVATE" not in result.model_dump_json()
 
 

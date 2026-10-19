@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { InspectionResponse } from '../types/inspection';
+import { inspectionQualitySummary } from '../utils/inspectionQualitySummary';
 import {
   getInspectionImages,
   getRecentInspections,
@@ -34,7 +35,9 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
   const [imageIds, setImageIds] = useState<string[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<string>('IMG-BOTTLE-0001');
   const [productId, setProductId] = useState<string>('ABCD1541');
-  const [inputInspectionId, setInputInspectionId] = useState<string>('INSP-001396');
+  const [queryDraft, setQueryDraft] = useState<string | null>(null);
+  const inputInspectionId = queryDraft ?? currentInspection?.inspection_id ?? '';
+  const queryEditVersion = useRef(0);
   const [recentInspections, setRecentInspections] = useState<InspectionResponse[]>([]);
 
   const [isLoadingImages, setIsLoadingImages] = useState<boolean>(false);
@@ -44,6 +47,16 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const initialLoadedRef = useRef<boolean>(false);
+  const qualitySummary = inspectionQualitySummary(currentInspection);
+  const displayedOrigin = !currentInspection ? '검사 대기'
+    : currentInspection.provenance === 'STORED_RESULT' ? '저장 결과 조회'
+      : currentInspection.provenance === 'RECORDED_TEST_FIXTURE' ? '저장 TEST FIXTURE'
+        : currentInspection.provenance === 'LIVEVIEW_GRAB' ? '신규 Grab 검사 결과'
+          : currentInspection.provenance === 'LIVE_INSPECTION' ? '신규 등록 이미지 검사 결과' : '실행·조회 출처 미확인';
+  const editQueryId = (value: string) => {
+    queryEditVersion.current++;
+    setQueryDraft(value);
+  };
 
   // Load available registered image IDs and recent inspections on mount
   useEffect(() => {
@@ -78,7 +91,6 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
               ...initial,
               provenance: 'STORED_RESULT',
             }, initialVersion);
-            setInputInspectionId(initial.inspection_id);
           }
         }
       } catch (err: any) {
@@ -97,6 +109,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
     customProvenance?: 'STORED_RESULT' | 'RECORDED_TEST_FIXTURE'
   ) => {
     const idToFetch = (targetId || inputInspectionId).trim();
+    const editVersion = queryEditVersion.current;
     if (!idToFetch) {
       setError('검사 ID를 입력하거나 목록에서 선택하세요.');
       return;
@@ -108,13 +121,15 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
 
     try {
       const res = await getInspection(idToFetch);
+      if (version !== undefined && getSelectionVersion && getSelectionVersion() !== version) return;
+      if (res.inspection_id !== idToFetch) throw new Error('INSPECTION_ID_MISMATCH');
       const prov =
         customProvenance || (idToFetch === 'INSP-001391' ? 'RECORDED_TEST_FIXTURE' : 'STORED_RESULT');
       onInspectionChange({
         ...res,
         provenance: prov,
       }, version);
-      setInputInspectionId(idToFetch);
+      if (queryEditVersion.current === editVersion) setQueryDraft(null);
     } catch (err: any) {
       console.error('Inspection query error:', err);
       setError(`검사 조회 실패: ${err.message || '해당 ID의 검사 기록을 찾을 수 없습니다.'}`);
@@ -140,7 +155,6 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
         ...res,
         provenance: 'LIVE_INSPECTION',
       }, version);
-      setInputInspectionId(res.inspection_id);
     } catch (err: any) {
       console.error('Live inspection execution error:', err);
       setError(`검사 실행 실패: ${err.message || 'PatchCore 검사 중 오류가 발생했습니다.'}`);
@@ -156,7 +170,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
     customProvenance?: 'STORED_RESULT' | 'RECORDED_TEST_FIXTURE'
   ) => {
     setSelectedImageId(imgId);
-    setInputInspectionId(id);
+    editQueryId(id);
     void handleQueryInspection(id, customProvenance);
   };
 
@@ -195,7 +209,11 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
           <span>
             <strong className="text-cyan">현재 결과 SOURCE: {!currentInspection ? 'NONE' : currentInspection.metrics?.input_source === 'LIVEVIEW_GRAB' ? 'EXPERIMENTAL LIVEVIEW_GRAB' : 'REGISTERED STATIC IMAGE'}</strong> — 아래 입력 컨트롤은 등록 정적 이미지 검사 전용
           </span>
-          <span className="text-slate-500 font-mono text-[10px]">Threshold: 34.1442</span>
+          <span className="text-slate-500 font-mono text-[10px]">PatchCore Threshold: {currentInspection?.decision_threshold?.toFixed(4) ?? '—'}</span>
+        </div>
+
+        <div aria-label="표시 중 검사 결과" className="text-xs text-slate-300 break-all">
+          표시 중 검사 ID: <strong>{currentInspection?.inspection_id ?? '—'}</strong> · {displayedOrigin}
         </div>
 
         {/* Error notification if any */}
@@ -305,13 +323,16 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
             <div className="flex-1 flex items-center gap-1.5">
               <input
                 type="text"
+                aria-label="검사 ID 조회 입력"
                 list="recent-inspections-list"
                 value={inputInspectionId}
-                onChange={(e) => setInputInspectionId(e.target.value)}
+                onChange={(e) => editQueryId(e.target.value)}
                 disabled={isQuerying || isInspecting}
                 placeholder="검사 ID (예: INSP-001387)"
                 className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono focus:border-cyan focus:outline-none"
               />
+              {queryDraft !== null && queryDraft.trim() !== currentInspection?.inspection_id
+                && <span className="text-[10px] text-amber">조회 입력값 편집 중 · 표시 중 검사 결과와 별도</span>}
               <datalist id="recent-inspections-list">
                 {recentInspections.map((insp) => (
                   <option
@@ -359,7 +380,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           {/* Final Verdict */}
           <div className="meta-pill">
-            <span className="meta-pill-label">종합 판정 (Verdict)</span>
+            <span className="meta-pill-label">서버 최종 판정 (Final)</span>
             <div className="flex items-center gap-1.5 mt-1">
               {currentInspection?.final_result === 'OK' && (
                 <CheckCircle2 size={16} className="text-emerald" />
@@ -396,11 +417,9 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
             <span className="meta-pill-label">이상 점수 (Score)</span>
             <span
               className={`meta-pill-value font-mono text-sm font-semibold ${
-                currentInspection?.anomaly_score !== null &&
-                currentInspection?.anomaly_score !== undefined &&
-                currentInspection.anomaly_score >= 34.1442
+                currentInspection?.result === 'NG'
                   ? 'text-rose-400'
-                  : currentInspection?.anomaly_score
+                  : currentInspection?.result === 'OK'
                   ? 'text-emerald'
                   : 'text-dim'
               }`}
@@ -442,10 +461,20 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
           </div>
         </div>
 
+        <div aria-label="모델 소견과 영상 품질 상세" className="bg-slate-900/60 border border-slate-800 p-2.5 rounded-lg text-xs space-y-2">
+          <div>PatchCore 모델 소견: <strong className="font-mono">{qualitySummary.modelVerdict}</strong> · 서버 최종 판정과 별도</div>
+          <div>평균 GV (ROI 전체): <strong className="font-mono">{qualitySummary.meanLabel}</strong></div>
+          <div>밝기 기준: {qualitySummary.criteria}</div>
+          <div>품질 사유: {qualitySummary.reason}</div>
+          {currentInspection?.final_result === 'REINSPECT' && currentInspection.final_reason_code === 'IMAGE_QUALITY_WARNING'
+            && <p className="text-amber">모델 OK/NG 소견과 무관하게 영상 품질 경고가 우선 적용되어 서버 판정은 REINSPECT입니다.</p>}
+        </div>
+
         {/* 3. Detailed Metadata Summary Row */}
         {currentInspection && (
           <div className="bg-slate-900/60 border border-slate-800 p-2.5 rounded-lg text-xs font-mono text-slate-400 flex flex-wrap items-center justify-between gap-2">
-            <div>
+            <details>
+              <summary>상세 정보 · 이미지 및 처리 시간</summary>
               <span className="text-slate-500">ID: </span>
               <span className="text-slate-200 font-bold">{currentInspection.inspection_id}</span>
               <span className="text-slate-500 ml-2">Image: </span>
@@ -454,7 +483,7 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
               <span className="text-slate-300">
                 {currentInspection.inference_time_ms ? `${currentInspection.inference_time_ms.toFixed(1)} ms` : '—'}
               </span>
-            </div>
+            </details>
 
             {/* Quick Trigger to Agent Diagnosis */}
             <button

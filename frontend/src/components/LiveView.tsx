@@ -14,6 +14,7 @@ import {
 import type { VideoMetadata, CaptureMetadata } from '../types/video';
 import type { RoiRect, RoiState } from '../types/roi';
 import { formatRoiCenter } from '../utils/coordinateTransforms';
+import { frameAtTime, selectVideoFrame } from '../utils/videoFrames';
 import { RoiOverlay } from './RoiOverlay';
 
 interface LiveViewProps {
@@ -54,25 +55,57 @@ export const LiveView: React.FC<LiveViewProps> = ({
   const [currentTime, setCurrentTime] = useState<number>(0);
   const duration = video?.duration_seconds || 8.0;
   const [currentFrame, setCurrentFrame] = useState<number>(0);
+  const selectedFrameRef = useRef(0);
+  const pendingFrameRef = useRef<number | null>(null);
+  const [isSeeking, setIsSeeking] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
   const [videoError, setVideoError] = useState<string | null>(null);
 
   const fps = video?.fps || 30.0;
-  const maxFrames = video?.frame_count ? video.frame_count - 1 : 239;
+  const frameCount = video?.frame_count || 240;
+  const maxFrames = frameCount - 1;
+
+  const updateFrameFromMedia = () => {
+    const media = videoRef.current;
+    if (!media || pendingFrameRef.current !== null) return;
+    const frame = frameAtTime(media.currentTime, fps, frameCount);
+    selectedFrameRef.current = frame;
+    setCurrentTime(media.currentTime);
+    setCurrentFrame(frame);
+  };
+
+  const seekToFrame = (frameIndex: number) => {
+    const media = videoRef.current;
+    if (!media) return;
+    const target = selectVideoFrame(frameIndex, fps, frameCount);
+    if (media.paused && !media.seeking && pendingFrameRef.current === null
+      && frameAtTime(media.currentTime, fps, frameCount) === target.frame) {
+      updateFrameFromMedia();
+      return;
+    }
+    selectedFrameRef.current = target.frame;
+    pendingFrameRef.current = target.frame;
+    setCurrentFrame(target.frame);
+    setCurrentTime(target.time);
+    setIsSeeking(true);
+    media.currentTime = target.time;
+    if (!media.seeking) {
+      pendingFrameRef.current = null;
+      setIsSeeking(false);
+      updateFrameFromMedia();
+    }
+  };
+
+  const handleSeeked = () => {
+    if (videoRef.current?.seeking) return;
+    pendingFrameRef.current = null;
+    setIsSeeking(false);
+    updateFrameFromMedia();
+  };
 
   // Video time update handler
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      const time = videoRef.current.currentTime;
-      setCurrentTime(time);
-      const calculatedFrame = Math.min(
-        Math.max(0, Math.floor(time * fps)),
-        maxFrames
-      );
-      if (calculatedFrame !== currentFrame) {
-        setCurrentFrame(calculatedFrame);
-      }
-    }
+    updateFrameFromMedia();
   };
 
   const handlePlayPause = () => {
@@ -88,65 +121,49 @@ export const LiveView: React.FC<LiveViewProps> = ({
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
+      updateFrameFromMedia();
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const targetTime = parseFloat(e.target.value);
-    if (videoRef.current) {
-      videoRef.current.currentTime = targetTime;
-      setCurrentTime(targetTime);
-      const calculatedFrame = Math.min(
-        Math.max(0, Math.floor(targetTime * fps)),
-        maxFrames
-      );
-      setCurrentFrame(calculatedFrame);
-    }
+    seekToFrame(frameAtTime(parseFloat(e.target.value), fps, frameCount));
   };
 
   const stepFrame = (delta: number) => {
     if (!videoRef.current) return;
+    const baseFrame = videoRef.current.paused ? selectedFrameRef.current
+      : frameAtTime(videoRef.current.currentTime, fps, frameCount);
     if (!videoRef.current.paused) {
       videoRef.current.pause();
       setIsPlaying(false);
     }
 
-    const frameDuration = 1 / fps;
-    const newTime = Math.min(
-      Math.max(0, videoRef.current.currentTime + delta * frameDuration),
-      duration
-    );
-    videoRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
-    const calculatedFrame = Math.min(
-      Math.max(0, Math.floor(newTime * fps)),
-      maxFrames
-    );
-    setCurrentFrame(calculatedFrame);
+    seekToFrame(baseFrame + delta);
   };
 
   const handleRestart = () => {
     if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      setCurrentTime(0);
-      setCurrentFrame(0);
+      seekToFrame(0);
       videoRef.current.play().then(() => setIsPlaying(true));
     }
   };
 
   const handleGrabClick = () => {
-    if (isGrabbing) return;
+    if (isGrabbing || !videoRef.current || videoRef.current.seeking || pendingFrameRef.current !== null) return;
     // Auto-pause upon manual grab for precision, if playing
     if (videoRef.current && !videoRef.current.paused) {
       videoRef.current.pause();
       setIsPlaying(false);
     }
-    onGrab(currentFrame);
+    updateFrameFromMedia();
+    onGrab(selectedFrameRef.current);
   };
 
   const handleRoiToggleClick = () => {
+    if (videoRef.current?.seeking || pendingFrameRef.current !== null) return;
+    updateFrameFromMedia();
     const isPaused = videoRef.current ? videoRef.current.paused : !isPlaying;
-    onToggleRoi(currentFrame, isPaused);
+    onToggleRoi(selectedFrameRef.current, isPaused);
   };
 
   // Format seconds to mm:ss.SSS
@@ -241,6 +258,10 @@ export const LiveView: React.FC<LiveViewProps> = ({
               muted
               crossOrigin="anonymous"
               onTimeUpdate={handleTimeUpdate}
+              onSeeking={() => setIsSeeking(true)}
+              onSeeked={handleSeeked}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
               onLoadedMetadata={() => {
                 setVideoLoaded(true);
               }}
@@ -349,7 +370,7 @@ export const LiveView: React.FC<LiveViewProps> = ({
                     : 'btn-primary'
                 }`}
                 onClick={handleGrabClick}
-                disabled={isGrabbing || !streamUrl}
+                disabled={isGrabbing || isSeeking || !streamUrl}
                 title={
                   roiState === 'EDITING'
                     ? '선택된 ROI 영역을 600×600 ImageView로 Crop 반영합니다'

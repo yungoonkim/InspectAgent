@@ -250,9 +250,14 @@ def test_get_inspection_by_id(client: TestClient):
     assert resp_404.status_code == 404
 
 
-def test_get_stored_agent_report(client: TestClient):
+def test_get_stored_agent_report(client: TestClient, tmp_path, monkeypatch):
     """Verify GET /inspections/{id}/agent-report returns stored report without calling Gemini."""
-    # INSP-001396 is a pre-stored fixture
+    from backend.agent.report_store import AgentReportStore, get_agent_report_store
+    report_store = AgentReportStore(tmp_path / "reports")
+    report_store.save({"inspection_id": "INSP-001396", "provenance": "RECORDED_TEST_FIXTURE",
+                       "overall_summary": "SYNTHETIC_TEST_ONLY", "observed_facts": [],
+                       "recommended_checks": [], "limitations": ["Not a live report"]})
+    monkeypatch.setitem(app.dependency_overrides, get_agent_report_store, lambda: report_store)
     response = client.get("/inspections/INSP-001396/agent-report")
     assert response.status_code == 200
     data = response.json()
@@ -265,6 +270,6 @@ def test_get_stored_agent_report(client: TestClient):
 
     # Test 404
     resp_404 = client.get("/inspections/INSP-NONEXISTENT-999999/agent-report")
-    assert resp_404.status_code == 404
+    assert resp_404.status_code == 422
 
 

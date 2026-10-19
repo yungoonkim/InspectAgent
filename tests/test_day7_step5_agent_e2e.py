@@ -25,6 +25,7 @@ from tests.test_agent_tools import make_log, make_record
 
 
 class FakeGemini:
+    analysis_mode = "FAKE_TEST"
     def __init__(self, responses):
         self.responses = iter(responses)
         self.requests = []
@@ -59,7 +60,8 @@ def forbid_google_network(monkeypatch):
 def environment(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     storage = JsonlInspectionStorage(tmp_path / "inspections.jsonl", tmp_path / "logs.jsonl")
-    settings = Settings(_env_file=None, ENABLE_PATCHCORE=False, GEMINI_API_KEY=None, GEMINI_MODEL="gemini-mock")
+    settings = Settings(_env_file=None, ENABLE_PATCHCORE=False, GEMINI_API_KEY=None, GEMINI_MODEL="gemini-mock",
+                        OUTPUT_DIR=str(tmp_path / "output"))
     monkeypatch.setattr("backend.main.get_settings", lambda: settings)
     previous = dict(app.dependency_overrides)
     app.dependency_overrides[get_analysis_storage] = lambda: storage

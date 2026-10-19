@@ -1,4 +1,4 @@
-"""Separate session-protected offline Vision review routes."""
+"""Separate session-protected Vision routes with default-disabled live transport."""
 
 from pathlib import Path
 import threading
@@ -31,7 +31,8 @@ def build_router(storage_getter):
         raw = get_grab_runtime(request, runtime.settings).authorize_record(record, owner)
         with _runtime_lock:
             if not hasattr(request.app.state, "vision_review_service"):
-                request.app.state.vision_review_service = VisionReviewService(Path(runtime.settings.absolute_output_path) / "vision_reviews")
+                request.app.state.vision_review_service = VisionReviewService.from_environment(
+                    Path(runtime.settings.absolute_output_path) / "vision_reviews", runtime.settings.GEMINI_API_KEY)
             service = request.app.state.vision_review_service
         return service, owner, validate_crop(record, raw, service.policy), raw
 
@@ -40,7 +41,7 @@ def build_router(storage_getter):
         try:
             service, owner, image, raw = prepare(request, inspection_id)
             review = service.get(owner, image)
-            return {"available": review is not None, "review": review, "capabilities": service.capabilities()}
+            return {"available": review is not None, "review": review, "capabilities": service.capabilities(image)}
         except (CaptureError, GrabInspectionError, VisionReviewError) as error:
             public_error(error)
 
@@ -54,8 +55,8 @@ def build_router(storage_getter):
                 except (CaptureError, GrabInspectionError, VisionReviewError):
                     raise VisionReviewError(409, "VISION_INPUT_CHANGED") from None
             review = await service.create(owner, image, raw, payload.request_id,
-                revalidate)
-            return {"available": True, "review": review, "capabilities": service.capabilities()}
+                revalidate, confirmed=payload.confirm_external_transmission)
+            return {"available": True, "review": review, "capabilities": service.capabilities(image)}
         except (CaptureError, GrabInspectionError, VisionReviewError) as error:
             public_error(error)
 

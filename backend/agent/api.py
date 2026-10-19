@@ -13,6 +13,7 @@ logger = logging.getLogger("backend.agent.api")
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from google import genai
+from google.genai.client import Client as GeminiSDKClient
 from google.genai import types
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -20,9 +21,10 @@ from starlette.concurrency import run_in_threadpool
 from backend.agent.schemas import AnalysisError, AnalysisErrorResponse, AnalysisResponse, DiagnosisResult
 from backend.agent.service import AgentService, CORE_FIELDS, SUMMARY_TEXT
 from backend.agent.errors import AgentFailure
+from backend.agent.report_store import AgentReportStore, ReportStoreError, get_agent_report_store
 from backend.agent.runtime_safety import (
-    API_VERSION, SDK_ATTEMPTS, SAFETY_REVISION, EXPECTED, AnalysisAdmission,
-    effective_configuration, verify_configuration,
+    API_VERSION, SDK_ATTEMPTS, SAFETY_REVISION, AnalysisAdmission,
+    effective_configuration, expected_configuration, verify_configuration,
 )
 from backend.agent.tools import INSPECTION_ID_PATTERN, InspectionTools, _valid_id
 from backend.config import Settings, get_settings
@@ -38,6 +40,8 @@ ERROR_STATUS = {
     "AGENT_RUNTIME_CONFIG_MISMATCH": 503,
     "AGENT_ADMISSION_UNAVAILABLE": 503,
     "AGENT_BUSY": 409,
+    "AGENT_REPORT_EXISTS": 409,
+    "AGENT_REPORT_STORAGE_FAILED": 503,
     "PROVIDER_REQUEST_LIMIT": 502,
     "STORAGE_ERROR": 503,
     "DATA_UNAVAILABLE": 503,
@@ -109,7 +113,12 @@ class AgentRuntime:
                     analysis_error("INVALID_MODEL_CONFIG")
                 self._configuration = configuration
                 self._close_timeout = settings.AGENT_MODEL_TIMEOUT_SECONDS
-        return AgentService(tools, settings=settings, client=self._client)
+        service = AgentService(tools, settings=settings, client=self._client)
+        service.report_provenance = (
+            "LIVE_AGENT_ANALYSIS" if isinstance(self._client, GeminiSDKClient)
+            and getattr(self._client, "analysis_mode", None) != "FAKE_TEST" else "FAKE_TEST"
+        )
+        return service
 
     async def aclose(self):
         client, self._client = self._client, None
@@ -190,6 +199,16 @@ async def get_agent_service(
 router = APIRouter(tags=["Agent analysis"])
 
 
+def require_new_report(
+    context: AnalysisContext = Depends(get_analysis_context),
+    store: AgentReportStore = Depends(get_agent_report_store),
+):
+    try:
+        store.ensure_absent(context.inspection_id)
+    except ReportStoreError as error:
+        analysis_error(error.code)
+
+
 async def analysis_admission(request: Request):
     runtime = getattr(request.app.state, "agent_runtime", None)
     if runtime is None:
@@ -212,11 +231,12 @@ async def runtime_safety(request: Request, settings: Settings = Depends(get_sett
         raise HTTPException(status_code=404, detail="Not found")
     candidate = AgentService(None, settings=settings)
     configuration = effective_configuration(settings, candidate.limits)
+    expected = expected_configuration(settings)
     runtime = getattr(request.app.state, "agent_runtime", None)
     return {
         "safety_revision": SAFETY_REVISION, "pid": os.getpid(),
-        "effective": configuration, "expected": EXPECTED,
-        "configuration_matches": configuration == EXPECTED,
+        "effective": configuration, "expected": expected,
+        "configuration_matches": configuration == expected,
         "credentials_configured": bool(settings.GEMINI_API_KEY),
         "client_initialized": runtime is not None and runtime._client is not None,
         "client_configuration_matches": runtime is None or runtime._client is None or runtime._configuration == (
@@ -229,10 +249,10 @@ async def runtime_safety(request: Request, settings: Settings = Depends(get_sett
 
 @router.post(
     "/analyze/{inspection_id}", response_model=AnalysisResponse,
-    dependencies=[Depends(analysis_admission)],
+    dependencies=[Depends(analysis_admission), Depends(require_new_report)],
     summary="Analyze an existing inspection without changing its verdict",
     description=(
-        "Read-only post-inspection diagnosis using stored results and logs. "
+        "Post-inspection diagnosis using stored results and logs; publishes a new immutable Agent report. "
         "Requires an existing inspection, including FAILED inspections. Does not create an inspection, "
         "reload an image or run PatchCore. Gemini configuration is required only for analysis requests."
     ),
@@ -245,6 +265,7 @@ async def runtime_safety(request: Request, settings: Settings = Depends(get_sett
 async def analyze_inspection(
     context: AnalysisContext = Depends(get_analysis_context),
     service: AgentService = Depends(get_agent_service),
+    store: AgentReportStore = Depends(get_agent_report_store),
 ) -> AnalysisResponse:
     try:
         raw = await service.analyze(context.inspection_id)
@@ -279,16 +300,10 @@ async def analyze_inspection(
         **response_data, analysis_id=f"ANALYSIS-{uuid4().hex}",
         inspection_result=context.record["result"], final_result=context.record["final_result"],
         final_reason_code=context.record["final_reason_code"], timestamp=datetime.now(timezone.utc).isoformat(),
+        provenance=getattr(service, "report_provenance", "FAKE_TEST"),
     )
     try:
-        from pathlib import Path
-        import json
-        report_dir = Path("data/outputs/agent_reports")
-        report_dir.mkdir(parents=True, exist_ok=True)
-        dumped = analysis_resp.model_dump()
-        dumped["provenance"] = "LIVE_AGENT_ANALYSIS"
-        with open(report_dir / f"{context.inspection_id}.json", "w", encoding="utf-8") as f:
-            json.dump(dumped, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+        await run_in_threadpool(store.save, analysis_resp.model_dump(mode="json"))
+    except ReportStoreError as error:
+        analysis_error(error.code)
     return analysis_resp

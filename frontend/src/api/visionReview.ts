@@ -6,10 +6,11 @@ export function getVisionReview(inspectionId: string): Promise<VisionReviewRespo
   return apiClient.request(`/inspections/${encodeURIComponent(inspectionId)}/vision-review`);
 }
 
-export async function createVisionReview(inspectionId: string, requestId: string): Promise<VisionReviewResponse> {
+export async function createVisionReview(inspectionId: string, requestId: string, confirmed: boolean): Promise<VisionReviewResponse> {
+  if (!confirmed) throw new Error('VISION_TRANSMISSION_CONSENT_REQUIRED');
   const csrf = await ensureCaptureSession();
   return apiClient.request(`/inspections/${encodeURIComponent(inspectionId)}/vision-review`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Capture-CSRF': csrf },
-    body: JSON.stringify({ request_id: requestId }),
+    body: JSON.stringify({ request_id: requestId, confirm_external_transmission: true }),
   });
 }

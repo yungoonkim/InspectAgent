@@ -25,3 +25,9 @@ test('all timeout codes prohibit automatic retry', () => {
 test('untrusted provider text never becomes a UI error message', () => {
   assert.doesNotMatch(agentFailureMessage('Bearer PRIVATE_PROMPT', 500), /PRIVATE_PROMPT|Bearer/);
 });
+
+test('existing reports and report storage failures never claim new live completion', () => {
+  assert.match(agentFailureMessage('AGENT_REPORT_EXISTS', 409), /기존 보고서를 보존/);
+  assert.match(agentFailureMessage('AGENT_REPORT_STORAGE_FAILED', 503), /완료로 처리하지/);
+  assert.match(agentFailureMessage('AGENT_REPORT_STORAGE_FAILED', 503), /자동 재호출하지/);
+});

@@ -24,6 +24,7 @@ from google.genai import errors, types
 import pytest
 
 from backend.agent.api import get_agent_service, get_analysis_storage
+from backend.agent.report_store import AgentReportStore, get_agent_report_store
 from backend.agent.schemas import AnalysisResponse
 from backend.agent.service import (
     _extract_provider_error_code,
@@ -66,6 +67,11 @@ def harness(tmp_path, monkeypatch):
     )
 
     original_overrides = dict(app.dependency_overrides)
+    report_store = AgentReportStore(tmp_path / "agent_reports")
+    for identifier in ("INSP-001396", "INSP-001398"):
+        report_store.save({"inspection_id": identifier, "analysis_status": "COMPLETED",
+                           "provenance": "RECORDED_TEST_FIXTURE"})
+    app.dependency_overrides[get_agent_report_store] = lambda: report_store
     app.dependency_overrides[get_analysis_storage] = lambda: storage
     monkeypatch.setattr("backend.main.get_settings", lambda: settings)
 

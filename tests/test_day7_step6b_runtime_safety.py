@@ -43,6 +43,7 @@ def forbid_real_sdk(monkeypatch):
 def harness(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     settings = Settings(_env_file=None, ENABLE_PATCHCORE=False, GEMINI_API_KEY="OFFLINE_SYNTHETIC_NOT_A_KEY",
+        OUTPUT_DIR=str(tmp_path / "output"),
         GEMINI_MODEL="gemini-3.8-flash", AGENT_MAX_TOOL_ROUNDS=4, AGENT_MAX_TOOL_CALLS=8,
         AGENT_MAX_REPEAT_CALLS=2, AGENT_REQUEST_TIMEOUT_SECONDS=60, AGENT_MODEL_TIMEOUT_SECONDS=15,
         AGENT_FINAL_MODEL_TIMEOUT_SECONDS=15, AGENT_TOOL_TIMEOUT_SECONDS=3, AGENT_MAX_PAYLOAD_BYTES=65536)
@@ -81,6 +82,45 @@ def test_effective_configuration_is_read_only_and_secret_free(harness):
             assert harness.fake.requests == []
             assert not harness.runtime.admission.path.exists()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("final_timeout", [15, 30])
+def test_final_timeout_opt_in_preserves_runtime_policy_and_report(harness, final_timeout):
+    harness.settings.AGENT_FINAL_MODEL_TIMEOUT_SECONDS = final_timeout
+    before = {path.name: path.read_bytes() for path in harness.directory.glob("*.jsonl")}
+
+    async def scenario():
+        async with client_for(harness) as client:
+            diagnostic = (await client.get("/agent/runtime-safety")).json()
+            expected = {**EXPECTED, "final_model_timeout_seconds": final_timeout}
+            assert diagnostic["configuration_matches"]
+            assert diagnostic["effective"] == diagnostic["expected"] == expected
+            assert harness.fake.requests == []
+            response = await client.post("/analyze/INSP-000001")
+            assert response.status_code == 200
+            assert response.json()["final_result"] == "OK"
+        configs = [request["config"] for request in harness.fake.requests]
+        assert len(configs) == 2
+        assert [config.http_options.timeout for config in configs] == [15000, final_timeout * 1000]
+        assert [config.http_options.headers["X-Server-Timeout"] for config in configs] == ["15", str(final_timeout)]
+        assert all(config.http_options.retry_options.attempts == 1 for config in configs)
+        assert all(config.max_output_tokens == 4096 and config.thinking_config is None for config in configs)
+        assert configs[-1].response_mime_type == "application/json"
+        assert configs[-1].tools is None
+
+    asyncio.run(scenario())
+    assert {path.name: path.read_bytes() for path in harness.directory.glob("*.jsonl")} == before
+    report = json.loads((harness.directory / "output/agent_reports/INSP-000001.json").read_text(encoding="utf-8"))
+    assert report["provenance"] == "FAKE_TEST"
+
+
+def test_final_timeout_must_match_configured_opt_in(harness):
+    harness.settings.AGENT_FINAL_MODEL_TIMEOUT_SECONDS = 30
+    with pytest.raises(AgentFailure, match="AGENT_RUNTIME_CONFIG_MISMATCH"):
+        verify_configuration(harness.settings, AgentLimits(final_model_timeout_seconds=15))
+    harness.fake.requests.clear()
+    verify_configuration(harness.settings, AgentLimits(final_model_timeout_seconds=30))
+    assert harness.fake.requests == []
 
 
 @pytest.mark.parametrize("peer,host", [("198.51.100.1", "127.0.0.1"), ("127.0.0.1", "example.com")])
@@ -148,8 +188,8 @@ def test_concurrent_http_requests_have_one_owner_and_get_remains_available(harne
             pass
     asyncio.run(scenario())
     assert {path.name: path.read_bytes() for path in harness.directory.glob("*.jsonl")} == before
-    report = json.loads((harness.directory / "data/outputs/agent_reports/INSP-000001.json").read_text(encoding="utf-8"))
-    assert report["provenance"] == "LIVE_AGENT_ANALYSIS"
+    report = json.loads((harness.directory / "output/agent_reports/INSP-000001.json").read_text(encoding="utf-8"))
+    assert report["provenance"] == "FAKE_TEST"
 
 
 @pytest.mark.parametrize("failure,status", [(RuntimeError("PRIVATE"), 502), (TimeoutError(), 504)])

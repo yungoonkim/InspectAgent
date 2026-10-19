@@ -5,6 +5,7 @@ import { LiveView } from './components/LiveView';
 import { ImageView } from './components/ImageView';
 import { InspectionPanel } from './components/InspectionPanel';
 import { GrabInspectionPanel } from './components/GrabInspectionPanel';
+import { InspectionTabs } from './components/InspectionTabs';
 import { AgentPanel } from './components/AgentPanel';
 import { VisionReviewPanel } from './components/VisionReviewPanel';
 import {
@@ -18,6 +19,7 @@ import {
 import type { VideoMetadata, CaptureMetadata } from './types/video';
 import type { RoiRect, CropData, RoiState } from './types/roi';
 import type { InspectionResponse } from './types/inspection';
+import type { ReinspectionGroup } from './types/reinspection';
 import { loadImageFromUrl, cropExactPixels } from './utils/imageCropper';
 import { computeRoiCenter } from './utils/coordinateTransforms';
 import { roiFits, sameSource, sourceKey } from './utils/roiLifetime';
@@ -33,6 +35,7 @@ export const App: React.FC = () => {
   const [mode, setMode] = useState<'MANUAL' | 'AUTO'>('MANUAL');
   const [apiConnected, setApiConnected] = useState<boolean>(false);
   const [video, setVideo] = useState<VideoMetadata | null>(null);
+  const [videos, setVideos] = useState<VideoMetadata[]>([]);
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [isGrabbing, setIsGrabbing] = useState<boolean>(false);
   const [capture, setCapture] = useState<CaptureMetadata | null>(null);
@@ -48,6 +51,7 @@ export const App: React.FC = () => {
 
   // Phase F-2: Static Image Inspection & Agent state
   const [currentInspection, setCurrentInspection] = useState<InspectionResponse | null>(null);
+  const [reinspectionGroup, setReinspectionGroup] = useState<ReinspectionGroup | null>(null);
   const selectionVersionRef = useRef(0);
   const getSelectionVersion = useCallback(() => selectionVersionRef.current, []);
   const startSelection = useCallback(() => {
@@ -68,6 +72,28 @@ export const App: React.FC = () => {
   const grabBusyRef = useRef(false);
   const acquiredFramesRef = useRef(new Set<string>());
 
+  const applyVideo = useCallback((nextVideo: VideoMetadata) => {
+    if (grabBusyRef.current) return;
+    const nextKey = sourceKey(nextVideo);
+    if (videoKeyRef.current !== nextKey) {
+      videoKeyRef.current = nextKey;
+      grabEpochRef.current++;
+      acquiredFramesRef.current.clear();
+      setRoiState('NO_ROI');
+      setRoi(DEFAULT_ROI);
+      setCapture(null);
+      setCropData(null);
+      setImageBlobUrl(null);
+      setCurrentInspection(null);
+      setGrabError(null);
+      setCropMessage(null);
+      selectionVersionRef.current++;
+    }
+    setVideo(nextVideo);
+    setStreamUrl(getVideoStreamUrl(nextVideo.video_id));
+    setGeneralError(null);
+  }, []);
+
   // Check API, bootstrap session, and load initial video metadata
   const loadInitialData = useCallback(async () => {
     try {
@@ -82,24 +108,9 @@ export const App: React.FC = () => {
       }
 
       const videoList = await getVideos();
+      setVideos(videoList.videos ?? []);
       if (videoList.videos && videoList.videos.length > 0) {
-        const primaryVideo = videoList.videos[0];
-        const nextKey = sourceKey(primaryVideo);
-        if (videoKeyRef.current !== nextKey) {
-          videoKeyRef.current = nextKey;
-          grabEpochRef.current++;
-          acquiredFramesRef.current.clear();
-          setRoiState('NO_ROI');
-          setRoi(DEFAULT_ROI);
-          setCapture(null);
-          setCropData(null);
-          setImageBlobUrl(null);
-          setCurrentInspection(null);
-          selectionVersionRef.current++;
-        }
-        setVideo(primaryVideo);
-        setStreamUrl(getVideoStreamUrl(primaryVideo.video_id));
-        setGeneralError(null);
+        applyVideo(videoList.videos[0]);
       } else {
         setGeneralError('등록된 비디오 소스가 없습니다. (data/outputs/videos 확인 필요)');
       }
@@ -108,7 +119,7 @@ export const App: React.FC = () => {
       setGeneralError('FastAPI 서버에 연결할 수 없습니다. (백엔드 서버 및 프록시 상태 확인)');
       console.warn('API Connection error:', err);
     }
-  }, []);
+  }, [applyVideo]);
 
   useEffect(() => {
     let isMounted = true;
@@ -422,7 +433,22 @@ export const App: React.FC = () => {
           )}
 
           {/* 1. Primary Live View Section with Integrated ROI Tools */}
+          <div className="live-video-selection">
+            <label htmlFor="live-video-source">LiveView 영상 선택</label>
+            <select id="live-video-source" value={video?.video_id ?? ''} disabled={isGrabbing || !videos.length}
+              onChange={event => {
+                const selected = videos.find(item => item.video_id === event.target.value);
+                if (selected) applyVideo(selected);
+              }}>
+              {!videos.length && <option value="">영상 목록 대기</option>}
+              {videos.map(item => <option key={item.video_id} value={item.video_id}>
+                {item.video_id} · {item.duration_seconds}초 · {item.frame_count}프레임{item.video_id === 'VID-000003' ? ' · 양품/불량 원본 혼합 데모' : ''}
+              </option>)}
+            </select>
+            <span>원본 분류를 섞은 합성 데모이며 PatchCore OK/NG 판정을 보장하지 않습니다. 영상 변경 시 ROI를 다시 지정하세요.</span>
+          </div>
           <LiveView
+            key={video ? sourceKey(video) : 'no-video'}
             video={video}
             streamUrl={streamUrl}
             isGrabbing={isGrabbing}
@@ -451,22 +477,24 @@ export const App: React.FC = () => {
             />
 
             <div className="flex flex-col gap-4">
-            <GrabInspectionPanel crop={cropData} enabled={mode === 'MANUAL' && roiState === 'APPLIED' && !isGrabbing} manualMode={mode === 'MANUAL'}
-              onSelectionStart={startSelection} onInspectionChange={handleInspectionChange} />
-            <VisionReviewPanel inspection={currentInspection} />
-            <InspectionPanel
-              currentInspection={currentInspection}
-              onInspectionChange={handleInspectionChange}
-              onSelectionStart={startSelection}
-              getSelectionVersion={getSelectionVersion}
-              onRunAgent={handleRunAgent}
-            />
+              <InspectionTabs
+                grabPanel={<GrabInspectionPanel crop={cropData} enabled={mode === 'MANUAL' && roiState === 'APPLIED' && !isGrabbing} manualMode={mode === 'MANUAL'}
+                  currentInspection={currentInspection}
+                  onSelectionStart={startSelection} onInspectionChange={handleInspectionChange} onGroupChange={setReinspectionGroup} />}
+                judgePanel={<VisionReviewPanel inspection={currentInspection} reinspectionGroup={reinspectionGroup} />}
+                staticImagePanel={<InspectionPanel
+                  currentInspection={currentInspection}
+                  onInspectionChange={handleInspectionChange}
+                  onSelectionStart={startSelection}
+                  getSelectionVersion={getSelectionVersion}
+                  onRunAgent={handleRunAgent}
+                />}
+              />
             </div>
           </div>
 
           {/* 3. Bottom Full Width: AI Agent Diagnostic Panel */}
-          {currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' && <p className="text-xs text-amber-300">Grab 검사의 Gemini Live 분석 연결은 이번 단계에서 제외됩니다.</p>}
-          <AgentPanel inspectionId={currentInspection?.metrics?.input_source === 'LIVEVIEW_GRAB' ? null : currentInspection?.inspection_id || null} />
+          <AgentPanel inspectionId={currentInspection?.inspection_id || null} />
         </div>
       </main>
     </div>

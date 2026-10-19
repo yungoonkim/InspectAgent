@@ -8,6 +8,8 @@ export function liveAnalysisLabel(status: LiveAnalysisStatus): string {
 }
 
 export function agentFailureMessage(code: unknown, status?: number): string {
+  if (code === 'AGENT_REPORT_EXISTS') return '기존 보고서를 보존했습니다. 기존 보고서 조회를 이용하세요. 새 유료 분석은 실행되지 않았습니다. (AGENT_REPORT_EXISTS)';
+  if (code === 'AGENT_REPORT_STORAGE_FAILED') return 'AI 분석 보고서 저장·조회에 실패했습니다. 완료로 처리하지 않습니다. 자동 재호출하지 말고 서버 저장 상태를 확인하세요. (AGENT_REPORT_STORAGE_FAILED)';
   if (code === 'MISSING_API_KEY') return 'Gemini API Key가 설정되지 않았습니다. 기존 보고서 조회를 이용하세요. (MISSING_API_KEY)';
   if (code === 'GEMINI_TIMEOUT' || code === 'AGENT_TIMEOUT' || code === 'TOOL_TIMEOUT') {
     return `Gemini 진단 제한 시간을 초과했습니다. 자동 재시도하지 않습니다. (${code})`;

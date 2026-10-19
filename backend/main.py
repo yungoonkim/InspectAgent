@@ -32,6 +32,7 @@ from backend.inspection import (
 from backend.storage import StorageError, get_inspection_storage
 from backend.ml.patchcore_inferencer import get_patchcore_inferencer
 from backend.agent.api import AgentRuntime, router as agent_router
+from backend.agent.report_store import ReportStoreError, get_agent_report_store
 from backend.video_api import VideoRuntime, allowed_origins, router as video_router
 from backend.roi_api import router as roi_router
 from backend.grab_inspection import GrabInspectionRequest, GrabInspectionError, get_grab_runtime, require_grab_owner
@@ -700,16 +701,16 @@ def get_inspection_endpoint(
 )
 def get_agent_report_endpoint(
     inspection_id: str,
+    store=Depends(get_agent_report_store),
 ) -> Dict[str, Any]:
     """Retrieve stored agent diagnosis report without calling Gemini."""
-    import json
-    report_path = Path("data/outputs/agent_reports") / f"{inspection_id}.json"
-    if report_path.exists() and report_path.is_file():
-        try:
-            with open(report_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as err:
-            raise HTTPException(status_code=500, detail=f"Failed to read report file: {err}")
+    try:
+        report = store.read(inspection_id)
+    except ReportStoreError as error:
+        raise HTTPException(status_code=422 if error.code == "INVALID_ARGUMENT" else 503,
+                            detail={"error_code": error.code}) from None
+    if report is not None:
+        return report
 
     raise HTTPException(
         status_code=404,

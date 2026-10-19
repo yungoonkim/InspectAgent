@@ -40,5 +40,5 @@ export interface AgentReport {
   final_result?: string | null;
   final_reason_code?: string | null;
   timestamp?: string;
-  provenance?: 'STORED_REPORT' | 'RECORDED_TEST_FIXTURE' | 'LIVE_AGENT_ANALYSIS';
+  provenance?: 'STORED_REPORT' | 'RECORDED_TEST_FIXTURE' | 'LIVE_AGENT_ANALYSIS' | 'FAKE_TEST';
 }

@@ -39,6 +39,7 @@ def harness(tmp_path, monkeypatch):
     record = storage.save_inspection(make_record())
     storage.save_log(make_log())
     settings = Settings(_env_file=None, ENABLE_PATCHCORE=False, GEMINI_API_KEY=None,
+                        OUTPUT_DIR=str(tmp_path / "output"),
                         GEMINI_MODEL="gemini-mock", INSPECTIONS_FILE=str(tmp_path / "inspections.jsonl"),
                         INSPECTION_LOGS_FILE=str(tmp_path / "logs.jsonl"))
     service, generator = service_for(storage, normal_responses())
@@ -295,18 +296,19 @@ def test_legacy_missing_fields_are_returned_as_null(harness):
     assert response.json()["final_reason_code"] is None
 
 
-def test_sequential_requests_have_independent_ids_and_real_traces(harness):
+def test_repeated_request_preserves_saved_report_without_new_analysis(harness):
     responses = normal_responses() + [call_response(("get_inspection_result", {"inspection_id": "INSP-000001"}),
                                                    ("get_execution_logs", {"inspection_id": "INSP-000001"})),
                                      report_response(report_payload())]
     service, generator = service_for(harness.storage, responses)
     app.dependency_overrides[get_agent_service] = lambda: service
     first = harness.client.post("/analyze/INSP-000001").json()
-    second = harness.client.post("/analyze/INSP-000001").json()
-    assert first["analysis_id"] != second["analysis_id"]
+    second = harness.client.post("/analyze/INSP-000001")
+    assert second.status_code == 409
+    assert second.json()["detail"]["error_code"] == "AGENT_REPORT_EXISTS"
     assert len(first["tool_execution_trace"]) == 1
-    assert len(second["tool_execution_trace"]) == 2
-    assert first["tool_execution_trace"][0]["sequence"] == second["tool_execution_trace"][0]["sequence"] == 1
+    assert first["tool_execution_trace"][0]["sequence"] == 1
+    assert harness.client.get("/inspections/INSP-000001/agent-report").json() == first
 
 
 def test_lazy_sdk_client_reused_and_closed_without_live_requests(harness, prohibit_real_sdk_client):
@@ -323,9 +325,10 @@ def test_lazy_sdk_client_reused_and_closed_without_live_requests(harness, prohib
     prohibit_real_sdk_client.assert_not_called()
     first = harness.client.post("/analyze/INSP-000001")
     second = harness.client.post("/analyze/INSP-000001")
-    assert first.status_code == second.status_code == 200
+    assert first.status_code == 200 and second.status_code == 409
+    assert first.json()["provenance"] == "FAKE_TEST"
     prohibit_real_sdk_client.assert_called_once()
-    assert first.json()["analysis_id"] != second.json()["analysis_id"]
+    assert second.json()["detail"]["error_code"] == "AGENT_REPORT_EXISTS"
     assert "mock-not-real-key" not in first.text
     harness.client.portal.call(app.state.agent_runtime.aclose)
     fake_client.aio.aclose.assert_awaited_once()

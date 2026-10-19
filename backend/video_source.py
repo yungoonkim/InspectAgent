@@ -37,10 +37,22 @@ class VideoEntry:
     codec: str = "h264"
 
 
-DEMO_VIDEO = VideoEntry(
+LEGACY_DEMO_VIDEO = VideoEntry(
     "VID-000001", "bottle_conveyor_clean_h264_1920x480_8s.mp4",
     "f1c5a12ee25672bfb8241311ecd16f7fefb7e549cb43a44a81bb4858ea9f9a2d",
     1920, 480, 30.0, 240,
+)
+
+DEMO_VIDEO = VideoEntry(
+    "VID-000002", "bottle_conveyor_bright_no_lines_h264_1920x480_8s.mp4",
+    "2eaee8ad99835600137ed54c1cfee25b009e22f41023fc1b41a08584ff314991",
+    1920, 480, 30.0, 240,
+)
+
+MIXED_DEMO_VIDEO = VideoEntry(
+    "VID-000003", "bottle_conveyor_mixed_ok_ng_16s_h264_1920x480.mp4",
+    "bcdf19620579a60b4d7211f6cb7e2db948336b240b0ac78114c18bb2359ef7d5",
+    1920, 480, 30.0, 480,
 )
 
 
@@ -49,7 +61,7 @@ class VideoFileSource:
                  max_width=1920, max_height=1080, max_frames=900, max_decoders=2,
                  capture_factory=None):
         self.root = Path(root).absolute()
-        self.entries = {entry.video_id: entry for entry in (entries if entries is not None else [DEMO_VIDEO])}
+        self.entries = {entry.video_id: entry for entry in (entries if entries is not None else [DEMO_VIDEO, LEGACY_DEMO_VIDEO, MIXED_DEMO_VIDEO])}
         self.max_bytes = max_bytes
         self.max_width = max_width
         self.max_height = max_height

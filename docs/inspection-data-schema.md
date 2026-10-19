@@ -17,19 +17,55 @@
 > `available=false`, 저장 결과가 있으면 `available=true`이며 응답은 `{available, review, capabilities}`입니다.
 > GET은 분석을 실행하지 않습니다.
 >
-> `POST` 같은 경로의 본문은 `{ "request_id": "32자리 소문자 UUID hex" }`만 허용합니다.
+> `POST` 같은 경로의 본문은 `{ "request_id": "32자리 소문자 UUID hex", "confirm_external_transmission": true }`입니다.
+> 동의 생략/false는 403 `VISION_TRANSMISSION_CONSENT_REQUIRED`, 비 boolean은 422이며 전송하지 않습니다.
 > 서버는 Origin/CSRF, 세션 소유권, LIVEVIEW_GRAB/REINSPECT, Crop PNG 형식·크기·채널·SHA256,
 > 검사 provenance 및 재검사 그룹 연결을 검증합니다. 클라이언트 이미지/URL/파일 경로는 받지 않습니다.
-> 현재 기본 동작은 **403 `VISION_LIVE_DISABLED`**이며 실제 Provider 전송 어댑터는 구현되지 않았습니다.
-> 명시적으로 주입한 테스트 Fake만 `analysis_mode=FAKE_TEST` 기록을 만들 수 있습니다.
+> Step 11: 기본 동작은 여전히 **403 `VISION_LIVE_DISABLED`**입니다. 별도 LIVE 전송 어댑터를 구현했고
+> 설치 SDK + MockTransport로만 검증했습니다. 실제 Google 요청 성공은 미검증입니다.
+> 명시적으로 주입한 테스트 Fake는 `analysis_mode=FAKE_TEST`, 승인된 실제 전송 경로만 `LIVE`로 기록합니다.
 >
-> 결과 의견은 `DEFECT_SUSPECTED`, `QUALITY_ISSUE`, `NO_VISIBLE_DEFECT`, `INCONCLUSIVE`,
-> 서버 실패 기록은 `ANALYSIS_FAILED`입니다. 이 값은 PatchCore 최종 판정이나 작업자 확인 결과가 아닙니다.
+> 과거 `prompt_version=bottle-independent-vision-v1` 의견은 `DEFECT_SUSPECTED`, `QUALITY_ISSUE`,
+> `NO_VISIBLE_DEFECT`, `INCONCLUSIVE`, 실패 시 `ANALYSIS_FAILED`입니다. 기존 파일은 읽기 호환만 제공하고
+> 새 Judge 판정으로 자동 변환하거나 재저장하지 않습니다.
+>
+> **Gemini Vision Judge A:** 동일 GET/POST 경로와 UUID `request_id` 계약을 재사용합니다.
+> 새 결과의 `prompt_version=bottle-vision-judge-a-v1`이며 `classification` 필드는 사용하지 않습니다.
+> `analysis_status=COMPLETED`이면 `judge_verdict=OK|NG|REINSPECT`, `failure_code=null`입니다.
+> 실행 실패·Timeout·응답 검증 실패이면 `analysis_status=ANALYSIS_FAILED`, `judge_verdict=null`이며
+> 안전한 `failure_code`를 저장합니다. 실패를 REINSPECT나 다른 제품 판정으로 위장하지 않습니다.
+> `visible_observations`, `judge_rationale`, `defect_locations`, `limitations`, `recommended_operator_action`을
+> 별도로 검증합니다. OK/NG에는 관찰 근거, NG에는 상대적인 관측 위치가 필요합니다.
+> `image_id`(원본 IMG-GRAB), inspection/capture/group ID, 원본 PNG SHA256·크기, 모델 요청/응답 ID,
+> 생성 시각, `analysis_mode=LIVE|FAKE_TEST`, HTTP 시도 계측을 같은 결과에 연결합니다.
+> 1차 `final_result`, 기존 RIG 시도 횟수와 작업자 MANUAL_OK/MANUAL_NG/HOLD는 변경하지 않습니다.
+> `capabilities.result_contract=VISION_JUDGE_A_V1` 및 `consent_policy=PER_REQUEST_CROP_V1`가 없는
+> 구버전 서버에서는 새 UI가 Judge POST를 차단합니다.
+> 과거 의견이 이미 저장된 검사 역시 기존 검사당 1회 정책이 유지되며 새 Judge 요청으로 우회하지 않습니다.
+> 자세한 적용 순서·세션 제약은 [Judge A 오프라인 검증](day7-gemini-vision-judge-a.md)을 참조하세요.
 > 별도 `OUTPUT_DIR/vision_reviews/state.json`에 검사/Capture/그룹 및 Crop SHA256을 연결합니다.
 > 검사당 1회, UTC 일일 10회 시도, 128개 기록 상한과 파일 OS Lock을 적용하고,
 > 호출 전 PENDING 예약으로 불확실 상태의 자동 재호출을 차단합니다.
-> 후보 모델/API, Provider 실제 재전송 횟수, 과금은 검증되지 않아 LIVE는 비활성입니다.
+> 공식 문서상 `gemini-4-argon`은 이미지 입력·구조화 출력을 지원하지만 계정 접근 및 실응답은 NOT TESTED입니다.
+> SDK attempts=1, HTTPX retries=0, redirect 금지와 HTTP 전송 경계 1회 guard를 적용했습니다.
+> LIVE 운영 설정은 `VISION_REVIEW_LIVE_ENABLED=true`, 지원 모델 및 기존 비공개 키로 관리하며 기본 비활성입니다.
+> 개별 검사는 UI의 명시적 동의 POST마다 서버가 소유권·REINSPECT·영속 PNG를 검증하고,
+> 검사 ID·이미지 ID·실제 SHA256·owner·request_id·모델·동의 시각을 PENDING 예약에 원자적으로 묶습니다.
+> `VISION_REVIEW_APPROVED_INSPECTION_ID` / `VISION_REVIEW_APPROVED_IMAGE_SHA256`는 더 이상 사용하지 않습니다.
+> 이미지마다 설정 변경이나 재시작이 필요하지 않습니다. 새 분석마다 새 HTTP 1회 전송기를 사용하고
+> 같은 검사 재분석·중복/불확실 요청·일일 상한 초과는 차단합니다. `consent_confirmed_at`을 결과에 저장합니다.
+> 이번 작업에서 활성화하거나 이미지를 외부로 전송하지 않았습니다.
 > [Step 9 구현·검증·한계](day7-step9-gemini-vision-offline-integration.md)를 참조하세요.
+> 최신 전송·승인 계약은 [Step 11 LIVE 어댑터](day7-step11-gemini-vision-live-integration.md)를 참조하세요.
+
+> Step 11 Diagnostic 보고서: `POST /analyze/{inspection_id}`는 기존 검사/로그를 읽어 **새 분석**을 수행하고
+> `OUTPUT_DIR/agent_reports/{inspection_id}.json`을 새로 발행합니다. 기존 파일이 있으면 Provider 호출 전
+> **409 `AGENT_REPORT_EXISTS`**로 거부합니다. 임시 파일 fsync 후 hard link로 완성본을 배타적으로 공개하며 덮어쓰지 않습니다.
+> 저장 실패는 **503 `AGENT_REPORT_STORAGE_FAILED`**이고 HTTP 200으로 숨기지 않습니다.
+> 응답 `provenance`는 실제 런타임 `LIVE_AGENT_ANALYSIS` 또는 주입 Fake의 `FAKE_TEST`입니다.
+> `GET /inspections/{inspection_id}/agent-report`는 같은 저장소를 읽을 뿐 새 분석/추론을 실행하지 않습니다.
+> 유효 ID에 보고서가 없으면 404 `NO_STORED_REPORT`, 잘못된 ID는 422, 손상·다른 ID 보고서는 503입니다.
+> 기존 `RECORDED_TEST_FIXTURE` 파일의 출처는 그대로 유지합니다. 검사 JSONL과 final_result는 변경하지 않습니다.
 
 > Day5 Step3 B-1-DB: ROI preset/version/명시 승인/활성 binding은 PostgreSQL에서 관리합니다.
 > [ROI 관리 API 계약](roi-postgresql-api.md)을 참조하세요. 캡처 세션과 관리 Bearer는 별개이며,

@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 from types import SimpleNamespace
 import threading
 from uuid import uuid4
@@ -221,6 +222,33 @@ def test_concurrent_duplicate_only_enters_sdk_once(vision):
         finally: vision.fake.release.set()
         assert future.result(timeout=5).status_code == 200
     assert len(vision.fake.calls) == 1
+
+
+@pytest.mark.parametrize("configured_timeout", [None, "15", "30"])
+def test_environment_timeout_reaches_service_wait_without_changing_agent(vision, monkeypatch, configured_timeout):
+    if configured_timeout is None:
+        monkeypatch.delenv("VISION_REVIEW_TIMEOUT_SECONDS", raising=False)
+    else:
+        monkeypatch.setenv("VISION_REVIEW_TIMEOUT_SECONDS", configured_timeout)
+    monkeypatch.setenv("VISION_REVIEW_LIVE_ENABLED", "false")
+    agent_timeout = main.settings.AGENT_FINAL_MODEL_TIMEOUT_SECONDS
+    environment_agent_timeout = os.environ.get("AGENT_FINAL_MODEL_TIMEOUT_SECONDS")
+    policy = VisionReviewService.from_environment(vision.h.directory / "timeout-policy", None).policy
+    vision.service.policy = policy
+    observed = []
+    original_wait_for = asyncio.wait_for
+
+    async def measured_wait_for(awaitable, timeout):
+        observed.append(timeout)
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr("backend.vision_review.asyncio.wait_for", measured_wait_for)
+    result = post(vision).json()["review"]
+    assert result["analysis_status"] == "COMPLETED"
+    assert observed == [int(configured_timeout or "15")]
+    assert len(vision.fake.calls) == 1
+    assert main.settings.AGENT_FINAL_MODEL_TIMEOUT_SECONDS == agent_timeout
+    assert os.environ.get("AGENT_FINAL_MODEL_TIMEOUT_SECONDS") == environment_agent_timeout
 
 
 def test_actual_wait_for_timeout_has_no_automatic_resend(vision):

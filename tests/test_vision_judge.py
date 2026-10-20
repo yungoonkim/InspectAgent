@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from backend.capture_store import CaptureError, CaptureStore
 from backend.grab_inspection import GrabInspectionError
 from backend.reinspection_store import ReinspectionError
-from backend.vision_review import VisionJudgeDraft
+from backend.vision_review import INSTRUCTION, VisionJudgeDraft
 from tests.test_grab_inspection import harness
 from tests.test_vision_review import vision, post
 
@@ -36,6 +36,50 @@ def test_reference_inspection_identifier_isolated_fake_contract(vision, monkeypa
     assert response.json()["capabilities"]["result_contract"] == "VISION_JUDGE_A_V1"
     assert vision.h.client.get(vision.endpoint).json()["review"] == review
     assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.parametrize("verdict", ["OK", "NG", "REINSPECT"])
+@pytest.mark.parametrize("language", ["ko", "en"])
+def test_korean_generation_and_existing_english_judge_remain_compatible(vision, verdict, language):
+    korean = {
+        "visible_observations": ["MOCK TEST: 입구 테두리에 밝은 반사가 관찰됩니다."],
+        "defect_locations": ["MOCK TEST: 이미지 위쪽 입구 테두리"],
+        "judge_rationale": "MOCK TEST: 관찰 의견이며 실제 결함 확정이나 정상 보증이 아닙니다.",
+        "limitations": ["MOCK TEST: 합성 테스트이므로 실제 제품 상태를 확인할 수 없습니다."],
+        "recommended_operator_action": "MOCK TEST: 작업자가 원본 이미지와 제품을 확인하세요.",
+    }
+    draft = json.loads(vision.fake.text)
+    if language == "ko":
+        draft.update(korean)
+    else:
+        draft["defect_locations"] = ["MOCK TEST: upper rim"]
+    draft["judge_verdict"] = verdict
+    if verdict != "NG":
+        draft["defect_locations"] = []
+    vision.fake.text = json.dumps(draft, ensure_ascii=False)
+    protected = [*vision.h.directory.glob("*.jsonl"), vision.h.runtime.reinspections.root / "state.json"]
+    before = {path: path.read_bytes() for path in protected}
+    request_id = uuid4().hex
+    result = post(vision, request_id)
+    assert result.status_code == 200, result.text
+    saved = result.json()["review"]
+    assert saved["analysis_status"] == "COMPLETED" and saved["analysis_mode"] == "FAKE_TEST"
+    for name, value in draft.items():
+        if name == "limitations":
+            assert saved[name][:-1] == value
+        else:
+            assert saved[name] == value
+    instruction = vision.fake.calls[0]["contents"][0]["parts"][0]["text"]
+    assert instruction == INSTRUCTION and "Write all natural-language explanations in Korean" in instruction
+    assert all(name in instruction for name in korean)
+    assert "Keep JSON field names" in instruction and "OK, NG, REINSPECT unchanged" in instruction
+    path = vision.service.files.root / "state.json"
+    stored_before = path.read_bytes()
+    assert vision.h.client.get(vision.endpoint).json()["review"] == saved
+    assert post(vision, request_id).json()["review"] == saved
+    assert path.read_bytes() == stored_before and len(vision.fake.calls) == 1
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert vision.h.storage.get_inspection(vision.record["inspection_id"]).final_result == "REINSPECT"
 
 
 @pytest.mark.parametrize("change", [

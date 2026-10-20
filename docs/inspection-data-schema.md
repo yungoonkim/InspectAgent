@@ -49,6 +49,7 @@
 > 공식 문서상 `gemini-4-argon`은 이미지 입력·구조화 출력을 지원하지만 계정 접근 및 실응답은 NOT TESTED입니다.
 > SDK attempts=1, HTTPX retries=0, redirect 금지와 HTTP 전송 경계 1회 guard를 적용했습니다.
 > LIVE 운영 설정은 `VISION_REVIEW_LIVE_ENABLED=true`, 지원 모델 및 기존 비공개 키로 관리하며 기본 비활성입니다.
+> `VISION_REVIEW_TIMEOUT_SECONDS`는 1~30의 정수 초이며 기본 15초입니다. 서비스 생성 시 읽고 전체 생성 대기·HTTP 전송·SDK timeout에 동일하게 적용합니다. SDK에는 밀리초로 변환하며 `X-Server-Timeout`은 초 단위입니다. 적용에는 사용자 직접 백엔드 재시작이 필요하며 Diagnostic Agent timeout 및 자동 재시도 정책은 변경하지 않습니다.
 > 개별 검사는 UI의 명시적 동의 POST마다 서버가 소유권·REINSPECT·영속 PNG를 검증하고,
 > 검사 ID·이미지 ID·실제 SHA256·owner·request_id·모델·동의 시각을 PENDING 예약에 원자적으로 묶습니다.
 > `VISION_REVIEW_APPROVED_INSPECTION_ID` / `VISION_REVIEW_APPROVED_IMAGE_SHA256`는 더 이상 사용하지 않습니다.

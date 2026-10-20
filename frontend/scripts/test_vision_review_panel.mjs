@@ -167,6 +167,38 @@ test('an explicit confirmed request uses the selected ID once and keeps primary 
   assert.deepEqual(input, before);
 });
 
+for (const language of ['ko', 'en']) {
+  test(`MOCK TEST: ${language} stored Judge explanations render unchanged without a new request`, async () => {
+    const input = inspection();
+    const before = structuredClone(input);
+    const saved = response(input, 'NG', 'FAKE_TEST');
+    if (language === 'ko') Object.assign(saved.review, {
+      visible_observations: ['MOCK TEST: 위쪽 테두리에 불연속 경계가 관찰됩니다.'],
+      defect_locations: ['MOCK TEST: 이미지 위쪽 입구 테두리'],
+      judge_rationale: 'MOCK TEST: 손상이 의심되지만 실제 결함을 확정하지 않습니다.',
+      limitations: ['MOCK TEST: 합성 응답이며 검출 정확도가 검증되지 않았습니다.'],
+      recommended_operator_action: 'MOCK TEST: 작업자가 제품을 직접 확인하세요.',
+    });
+    const savedBefore = structuredClone(saved);
+    const view = panel(input, async () => saved);
+    view.render(); await view.settle();
+    for (let count = 0; count < 3; count++) {
+      const rendered = text(view.render());
+      for (const field of ['visible_observations', 'defect_locations', 'limitations']) {
+        for (const value of saved.review[field]) assert.ok(rendered.includes(value));
+      }
+      assert.ok(rendered.includes(saved.review.judge_rationale));
+      assert.ok(rendered.includes(saved.review.recommended_operator_action));
+      assert.match(rendered, /1차 서버 판정 REINSPECT/);
+      assert.match(rendered, /FAKE_TEST · 실제 Google 판정 아님/);
+      assert.equal(view.button().props.disabled, true);
+    }
+    assert.deepEqual(saved, savedBefore);
+    assert.deepEqual(input, before);
+    assert.deepEqual(view.requests, { get: [input.inspection_id], post: [] });
+  });
+}
+
 test('a late result from another Crop cannot appear in the selected Judge', async () => {
   const first = inspection();
   const second = inspection('B');

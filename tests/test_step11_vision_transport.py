@@ -248,8 +248,9 @@ def test_saved_crop_traverses_service_and_installed_sdk_without_external_io(harn
     assert harness.storage.get_inspection(record["inspection_id"]).final_result == "REINSPECT"
 
 
+@pytest.mark.parametrize("configured_timeout", [None, "15", "30"])
 @pytest.mark.parametrize("model", sorted(SUPPORTED_MODELS))
-def test_dynamic_live_factory_uses_a_fresh_one_attempt_transport_per_image(harness, monkeypatch, model):
+def test_dynamic_live_factory_uses_a_fresh_one_attempt_transport_per_image(harness, monkeypatch, model, configured_timeout):
     from types import SimpleNamespace
     import backend.main as main
     from tests.test_dynamic_vision_judge import new_crop
@@ -257,9 +258,12 @@ def test_dynamic_live_factory_uses_a_fresh_one_attempt_transport_per_image(harne
     records = [new_crop(SimpleNamespace(h=harness), variant) for variant in (1, 2)]
     expected = [(harness.runtime.root / f'{record["image_id"]}.png').read_bytes() for record in records]
     transports, requests = [], []
+    expected_timeout = int(configured_timeout or "15")
     _, draft = sample()
     def handler(request):
         assert request.url.path == f"/v1beta/models/{model}:generateContent"
+        assert request.headers["X-Server-Timeout"] == str(expected_timeout)
+        assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), expected_timeout)
         parts = json.loads(request.content)["contents"][0]["parts"]
         requests.append(base64.urlsafe_b64decode(parts[1]["inlineData"]["data"]))
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps(draft)}]},
@@ -271,9 +275,14 @@ def test_dynamic_live_factory_uses_a_fresh_one_attempt_transport_per_image(harne
     monkeypatch.setattr("backend.vision_review.GeminiVisionTransport", transport_factory)
     monkeypatch.setenv("VISION_REVIEW_LIVE_ENABLED", "true")
     monkeypatch.setenv("VISION_REVIEW_MODEL", model)
+    if configured_timeout is None:
+        monkeypatch.delenv("VISION_REVIEW_TIMEOUT_SECONDS", raising=False)
+    else:
+        monkeypatch.setenv("VISION_REVIEW_TIMEOUT_SECONDS", configured_timeout)
     monkeypatch.delenv("VISION_REVIEW_APPROVED_INSPECTION_ID", raising=False)
     monkeypatch.delenv("VISION_REVIEW_APPROVED_IMAGE_SHA256", raising=False)
     service = VisionReviewService.from_environment(harness.directory / "dynamic-sdk", "SYNTHETIC_NOT_A_CREDENTIAL")
+    assert service.policy.timeout_seconds == expected_timeout
     monkeypatch.setattr(main.app.state, "vision_review_service", service, raising=False)
     for record in records:
         result = harness.client.post(f'/inspections/{record["inspection_id"]}/vision-review', json={
@@ -286,6 +295,17 @@ def test_dynamic_live_factory_uses_a_fresh_one_attempt_transport_per_image(harne
     assert requests == expected and expected[0] != expected[1]
     assert len(transports) == 2 and transports[0] is not transports[1]
     assert all(transport.http_attempts == 1 for transport in transports)
+    assert all(transport.timeout_seconds == expected_timeout for transport in transports)
+
+
+@pytest.mark.parametrize("value", ["", "invalid", "15.5", "0", "-1", "31", "nan", "inf"])
+def test_invalid_environment_timeout_fails_before_request_or_storage(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("VISION_REVIEW_TIMEOUT_SECONDS", value)
+    monkeypatch.setenv("VISION_REVIEW_LIVE_ENABLED", "true")
+    monkeypatch.setenv("VISION_REVIEW_MODEL", "gemini-3.8-flash")
+    with pytest.raises(ValueError):
+        VisionReviewService.from_environment(tmp_path, "SYNTHETIC_NOT_A_CREDENTIAL")
+    assert not (tmp_path / "state.json").exists()
 
 
 @pytest.mark.parametrize("model", sorted(SUPPORTED_MODELS))

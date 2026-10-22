@@ -18,6 +18,9 @@ from typing import Literal
 from backend.video_source import reject_links
 
 
+JUDGE_ASSISTED_POLICY = "judge-assisted-v1"
+
+
 class ReinspectionError(Exception):
     def __init__(self, status_code, code):
         self.status_code = status_code
@@ -134,7 +137,16 @@ class ReinspectionStore:
         group = state["groups"].get(identifier)
         if group is None or not secrets.compare_digest(group["owner"], owner):
             raise ReinspectionError(404, "REINSPECTION_GROUP_NOT_FOUND")
+        self._judge_assisted(group)
         return group
+
+    @staticmethod
+    def _judge_assisted(group):
+        if "workflow_policy" not in group:
+            return False
+        if group["workflow_policy"] != JUDGE_ASSISTED_POLICY:
+            raise ReinspectionError(503, "REINSPECTION_POLICY_UNSUPPORTED")
+        return True
 
     @staticmethod
     def public(group):
@@ -154,7 +166,7 @@ class ReinspectionStore:
                 raise ReinspectionError(404, "REINSPECTION_GROUP_NOT_FOUND")
             return self.public(self._group(state, claim["group_id"], owner))
 
-    def execute(self, owner, capture_id, payload, metadata, storage, operation):
+    def execute(self, owner, capture_id, payload, metadata, storage, operation, *, judge_assisted=False):
         with self.locked():
             state = self._read()
             fingerprint = hashlib.sha256(json.dumps({"product_id": payload.product_id,
@@ -170,6 +182,7 @@ class ReinspectionStore:
                     raise ReinspectionError(409, "CAPTURE_ALREADY_USED")
                 if claim["status"] != "COMMITTED":
                     raise ReinspectionError(409, "REINSPECTION_RECOVERY_REQUIRED")
+                self._group(state, claim["group_id"], owner)
                 record = storage.get_inspection(claim["inspection_id"])
                 if record is None:
                     raise ReinspectionError(503, "REINSPECTION_RECORD_MISSING")
@@ -184,13 +197,20 @@ class ReinspectionStore:
                     "version": 0, "status": "RETRY_ALLOWED", "first_inspection_id": None,
                     "current_inspection_id": None, "attempts": [], "failed_attempts": [], "manual_reviews": [],
                     "created_at": now(), "updated_at": now()}
+                if judge_assisted is True:
+                    group.update(workflow_policy=JUDGE_ASSISTED_POLICY, max_attempts=None,
+                        remaining_attempts=None, status="INSPECTION_PENDING")
                 state["groups"][identifier] = group
             else:
                 group = self._group(state, payload.group_id, owner)
                 identifier = group["group_id"]
-                if group["status"] != "RETRY_ALLOWED" or group["attempt_count"] >= 3:
+                assisted = self._judge_assisted(group)
+                if (assisted and (group["status"] != "INSPECTION_FAILED" or group["attempts"]
+                        or group["current_inspection_id"] is not None)):
                     raise ReinspectionError(409, "REINSPECTION_GROUP_CLOSED")
-                if (not payload.same_product_confirmed
+                if not assisted and (group["status"] != "RETRY_ALLOWED" or group["attempt_count"] >= 3):
+                    raise ReinspectionError(409, "REINSPECTION_GROUP_CLOSED")
+                if ((not assisted and not payload.same_product_confirmed)
                         or payload.parent_inspection_id != group["current_inspection_id"]
                         or payload.expected_version != group["version"]):
                     raise ReinspectionError(409, "REINSPECTION_CONTINUITY_REQUIRED")
@@ -198,13 +218,17 @@ class ReinspectionStore:
                         or metadata["source_revision"] != group["source_revision"]
                         or metadata["width"] != group["source_width"] or metadata["height"] != group["source_height"]):
                     raise ReinspectionError(409, "REINSPECTION_SOURCE_MISMATCH")
-                for previous in [*group["attempts"], *group["failed_attempts"]]:
+                previous_attempts = [] if assisted else [*group["attempts"], *group["failed_attempts"]]
+                for previous in previous_attempts:
                     source = previous["input_provenance"]
                     if (source["frame_index"] == metadata["frame_index"]
                             or source["capture_sha256"] == metadata.get("capture_sha256")):
                         raise ReinspectionError(409, "REINSPECTION_SAME_RECORDED_IMAGE")
+            assisted = self._judge_assisted(group)
+            previous_status = group["status"]
             context = {"group_id": identifier, "parent_inspection_id": group["current_inspection_id"],
-                       "attempt_number": group["attempt_count"] + 1, "max_attempts": 3, "started": False}
+                       "attempt_number": group["attempt_count"] + 1,
+                       "max_attempts": None if assisted else 3, "started": False}
             state["captures"][capture_id] = {"owner": owner, "fingerprint": fingerprint,
                 "group_id": identifier, "status": "RESERVED"}
             if request_key:
@@ -231,9 +255,13 @@ class ReinspectionStore:
                     group["current_inspection_id"] = saved.inspection_id
                 else:
                     group["failed_attempts"].append(entry)
-                group["status"] = ("COMPLETED" if completed(saved) and saved.final_result in {"OK", "NG"}
-                    else "MANUAL_REVIEW_REQUIRED" if group["attempt_count"] == 3 else "RETRY_ALLOWED")
-                group["remaining_attempts"] = 3 - group["attempt_count"] if group["status"] == "RETRY_ALLOWED" else 0
+                if assisted:
+                    group["status"] = ("INSPECTION_FAILED" if not completed(saved)
+                        else "COMPLETED" if saved.final_result in {"OK", "NG"} else "MANUAL_REVIEW_REQUIRED")
+                else:
+                    group["status"] = ("COMPLETED" if completed(saved) and saved.final_result in {"OK", "NG"}
+                        else "MANUAL_REVIEW_REQUIRED" if group["attempt_count"] == 3 else "RETRY_ALLOWED")
+                    group["remaining_attempts"] = 3 - group["attempt_count"] if group["status"] == "RETRY_ALLOWED" else 0
                 group["version"] += 1
                 group["updated_at"] = now()
                 state["captures"][capture_id].update(status="COMMITTED", inspection_id=saved.inspection_id)
@@ -247,27 +275,69 @@ class ReinspectionStore:
                     if new_group:
                         del state["groups"][identifier]
                     else:
-                        group["status"] = "RETRY_ALLOWED"
+                        group["status"] = previous_status
                     self._write(state)
                 raise
 
-    def review(self, identifier, owner, payload):
+    def _review_record(self, state, group, owner, storage, authorize_record):
+        if storage is None or authorize_record is None:
+            raise ReinspectionError(503, "MANUAL_REVIEW_VERIFICATION_UNAVAILABLE")
+        if len(group["attempts"]) != 1:
+            raise ReinspectionError(409, "MANUAL_REVIEW_NOT_ALLOWED")
+        entry = group["attempts"][0]
+        try:
+            record = storage.get_inspection(entry["inspection_id"])
+        except Exception:
+            raise ReinspectionError(503, "MANUAL_REVIEW_RECORD_UNAVAILABLE") from None
+        if (record is None or not completed(record) or record.final_result != "REINSPECT"
+                or record.inspection_id != group["current_inspection_id"]
+                or record.inspection_id != group["first_inspection_id"]
+                or record.product_id != group["product_id"] or record.image_id != entry["image_id"]
+                or entry["final_result"] != record.final_result
+                or record.metrics.get("input_source") != "LIVEVIEW_GRAB"
+                or record.metrics.get("reinspection", {}).get("group_id") != group["group_id"]
+                or record.metrics.get("input_provenance") != entry["input_provenance"]):
+            raise ReinspectionError(409, "MANUAL_REVIEW_SOURCE_MISMATCH")
+        source = record.metrics["input_provenance"]
+        claim = state["captures"].get(source["capture_id"], {})
+        if (claim.get("owner") != owner or claim.get("status") != "COMMITTED"
+                or claim.get("group_id") != group["group_id"] or claim.get("inspection_id") != record.inspection_id
+                or source.get("video_id") != group["video_id"]
+                or source.get("source_revision") != group["source_revision"]
+                or source.get("source_width") != group["source_width"]
+                or source.get("source_height") != group["source_height"]
+                or source.get("reinspection", {}).get("group_id") != group["group_id"]):
+            raise ReinspectionError(409, "MANUAL_REVIEW_SOURCE_MISMATCH")
+        try:
+            authorize_record(record, owner)
+        except Exception:
+            raise ReinspectionError(409, "MANUAL_REVIEW_INPUT_UNAVAILABLE") from None
+        return record
+
+    def review(self, identifier, owner, payload, *, storage=None, authorize_record=None):
         with self.locked():
             state = self._read()
             group = self._group(state, identifier, owner)
+            assisted = self._judge_assisted(group)
+            record = self._review_record(state, group, owner, storage, authorize_record) if assisted else None
             for previous in group["manual_reviews"]:
                 if previous["request_id"] == payload.request_id:
                     if any(previous[key] != getattr(payload, key) for key in ("result", "operator_id", "reason")):
                         raise ReinspectionError(409, "IDEMPOTENCY_CONFLICT")
                     return self.public(group)
-            if group["status"] != "MANUAL_REVIEW_REQUIRED" or group["attempt_count"] != 3:
+            if group["status"] != "MANUAL_REVIEW_REQUIRED" or (not assisted and group["attempt_count"] != 3):
                 raise ReinspectionError(409, "MANUAL_REVIEW_NOT_ALLOWED")
             if payload.expected_version != group["version"]:
                 raise ReinspectionError(409, "REINSPECTION_VERSION_CONFLICT")
-            group["manual_reviews"].append({"review_id": f"REV-{uuid4().hex}", "timestamp": now(),
+            review = {"review_id": f"REV-{uuid4().hex}", "timestamp": now(),
                 "request_id": payload.request_id, "operator_id": payload.operator_id, "reason": payload.reason,
                 "result": payload.result, "authority": "DEVELOPMENT_SELF_DECLARED_NOT_AUTHENTICATED",
-                "inspection_ids": [entry["inspection_id"] for entry in group["attempts"]]})
+                "inspection_ids": [entry["inspection_id"] for entry in group["attempts"]]}
+            if assisted:
+                review.update(workflow_policy=JUDGE_ASSISTED_POLICY, inspection_id=record.inspection_id,
+                    image_id=record.image_id, crop_sha256=record.metrics["input_provenance"]["crop_sha256"],
+                    server_final_result=record.final_result)
+            group["manual_reviews"].append(review)
             if payload.result != "HOLD":
                 group["status"] = "MANUAL_REVIEWED"
             group["version"] += 1

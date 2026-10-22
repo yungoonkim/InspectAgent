@@ -5,6 +5,7 @@ and fault injection comparison endpoints for the MVTec AD Bottle inspection AI A
 """
 
 from contextlib import asynccontextmanager
+import asyncio
 from pathlib import Path
 import re
 from typing import Any, Dict, Optional
@@ -40,6 +41,7 @@ from backend.capture_store import CaptureError
 from backend.reinspection_store import ManualReviewRequest, ReinspectionError
 from backend.video_api import get_video_runtime, require_origin, public_error
 from backend.vision_review_api import build_router as build_vision_review_router
+from backend.quality_shadow_worker import create_quality_shadow_worker, report_shadow_failure
 
 settings = get_settings()
 
@@ -54,6 +56,7 @@ async def lifespan(app: FastAPI):
     current_settings = get_settings()
     app.state.agent_runtime = AgentRuntime()
     app.state.video_runtime = VideoRuntime(current_settings)
+    app.state.quality_shadow_worker = create_quality_shadow_worker(current_settings)
     if getattr(current_settings, "ENABLE_PATCHCORE", True):
         try:
             get_patchcore_inferencer()
@@ -62,6 +65,11 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if app.state.quality_shadow_worker is not None:
+            try:
+                await asyncio.to_thread(app.state.quality_shadow_worker.close)
+            except Exception:
+                report_shadow_failure("QUALITY_SHADOW_SHUTDOWN_FAILED")
         await app.state.agent_runtime.aclose()
         app.state.video_runtime.captures.close()
         if hasattr(app.state, "roi_runtime"):
@@ -538,7 +546,9 @@ def save_manual_review(group_id: str, payload: ManualReviewRequest, request: Req
     try:
         owner = runtime.captures.authorize(request.cookies.get(runtime.captures.cookie_name),
             request.headers.get("x-capture-csrf"), write=True)
-        return get_grab_runtime(request, runtime.settings).reinspections.review(group_id, owner, payload)
+        grab_runtime = get_grab_runtime(request, runtime.settings)
+        return grab_runtime.reinspections.review(group_id, owner, payload,
+            storage=get_inspection_storage(), authorize_record=grab_runtime.authorize_record)
     except (CaptureError, ReinspectionError) as error:
         public_error(error)
 

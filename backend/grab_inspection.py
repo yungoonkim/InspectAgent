@@ -19,6 +19,8 @@ from backend.inspection import ImageRegistry, execute_inspection_workflow
 from backend.video_source import reject_links
 from backend.anomaly_map_store import get_anomaly_map_metadata
 from backend.reinspection_store import ReinspectionStore, completed
+from backend.quality_shadow_metrics import SourceIdentity
+from backend.quality_shadow_worker import ShadowJob, report_shadow_failure
 
 
 LIMITATION = "LiveView Grab 기반 검사는 기존 PatchCore 모델을 이용한 실험적 검사입니다. 영상 Crop에 대한 임계값 보정 및 검출 성능은 별도로 검증되지 않았습니다."
@@ -108,13 +110,14 @@ class CheckedPredictor:
 
 
 class GrabInspectionRuntime:
-    def __init__(self, root, *, max_inputs=128, max_bytes=256 * 1024 * 1024):
+    def __init__(self, root, *, max_inputs=128, max_bytes=256 * 1024 * 1024, shadow_worker=None):
         self.root = Path(root).absolute()
         self.max_inputs = max_inputs
         self.max_bytes = max_bytes
         self._lock = threading.Lock()
         self._attempts = {}
         self.reinspections = ReinspectionStore(self.root.parent / "reinspection_history")
+        self.shadow_worker = shadow_worker
 
     def _path(self, image_id, suffix):
         if re.fullmatch(r"IMG-GRAB-[0-9a-f]{32}", image_id or "") is None:
@@ -151,9 +154,24 @@ class GrabInspectionRuntime:
         if metadata["source_revision"] != payload.source_revision:
             raise GrabInspectionError(409, "SOURCE_REVISION_MISMATCH")
         metadata = {**metadata, "capture_sha256": hashlib.sha256(captures.image(token, capture_id)).hexdigest()}
-        return self.reinspections.execute(owner, capture_id, payload, metadata, storage,
-            lambda context: self._inspect(captures, token, csrf, capture_id, payload, storage,
-                inferencer_factory, settings, context))
+        created = False
+        def operation(context):
+            nonlocal created
+            record = self._inspect(captures, token, csrf, capture_id, payload, storage, inferencer_factory, settings, context)
+            created = True
+            return record
+        record = self.reinspections.execute(owner, capture_id, payload, metadata, storage, operation,
+            judge_assisted=getattr(settings, "JUDGE_ASSISTED_WORKFLOW_ENABLED", False) is True)
+        if created and completed(record) and getattr(settings, "QUALITY_SHADOW_ENABLED", False) and self.shadow_worker is not None:
+            try:
+                frozen_record = record.model_copy(deep=True)
+                provenance = frozen_record.metrics["input_provenance"]
+                source = SourceIdentity(inspection_id=record.inspection_id, image_id=record.image_id,
+                    crop_sha256=provenance["crop_sha256"], width=provenance["crop_width"], height=provenance["crop_height"])
+                self.shadow_worker.submit(ShadowJob(source, lambda: self.authorize_record(frozen_record, owner)))
+            except Exception:
+                report_shadow_failure("QUALITY_SHADOW_ENQUEUE_FAILED")
+        return record
 
     def _inspect(self, captures, token, csrf, capture_id, payload, storage, inferencer_factory, settings, context):
         owner = captures.authorize(token, csrf, write=True)
@@ -250,7 +268,8 @@ def get_grab_runtime(request, settings):
     with _runtime_lock:
         if not hasattr(request.app.state, "grab_inspection_runtime"):
             root = Path(settings.absolute_output_path) / "grab_inspection_inputs"
-            request.app.state.grab_inspection_runtime = GrabInspectionRuntime(root)
+            request.app.state.grab_inspection_runtime = GrabInspectionRuntime(root,
+                shadow_worker=getattr(request.app.state, "quality_shadow_worker", None))
         return request.app.state.grab_inspection_runtime
 
 

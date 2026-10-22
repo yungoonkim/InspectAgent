@@ -1,0 +1,23 @@
+InspectAgent/
+│
+├── backend/                  # FastAPI · PatchCore · Gemini
+├── frontend/                 # React · UI
+├── models/                   # 모델 파일
+├── dataset/                  # 원본 데이터
+├── data/
+│   └── outputs/
+│       ├── grab_inspection_inputs/  # 기존 Crop + Image Manifest 유지
+│       ├── captures/               # 기존 임시 Capture 유지
+│       ├── videos/                 # 기존 등록 영상 유지
+│       ├── quality_shadow_metrics/ # 기존 Sidecar 유지
+│       └── safe-regression/        # 기존 테스트 증거 유지
+│
+├── tests/                    # 테스트 코드
+├── scripts/                  # 제작·실험·검증 스크립트
+├── docs/
+│   ├── progress/             # 개선·변경 이력 (신규)
+│   ├── architecture/         # 구조 설계 문서 (선택)
+│   └── reports/              # 검증 보고서 (선택)
+│
+├── presentation/             # 발표 자료
+└── AGENTS.md                 # Codex 작업 규칙

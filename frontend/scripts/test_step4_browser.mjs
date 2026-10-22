@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { agentHarnessSource, runAgentChecks } from './agent_browser_cases.mjs';
 import { grabHarnessSource, runGrabChecks } from './grab_browser_cases.mjs';
 import { visionHarnessSource, runVisionChecks } from './vision_browser_cases.mjs';
 import { roiHarnessSource, runRoiChecks } from './roi_browser_cases.mjs';
+import { createOwnedBrowserRun, watchOwnedBrowser, finishOwnedBrowser, cleanupOwnedBrowserCaches } from './browser_cache_cleanup.mjs';
 
 const agentMode = process.argv.includes('--agent');
 const grabMode = process.argv.includes('--grab');
@@ -227,10 +228,11 @@ async function runBrowserAudit(outputRoot) {
   let browser;
   let cdp;
   let browserStderr = '';
-  let browserExit;
+  let ownedRun;
   try {
     await mkdir(outputRoot, { recursive: true });
-    const runDirectory = await mkdtemp(path.join(outputRoot, 'step4-browser-'));
+    ownedRun = await createOwnedBrowserRun(outputRoot);
+    const runDirectory = ownedRun.directory;
     summary.evidencePath = runDirectory;
     const chrome = await findChrome();
     if (!chrome) {
@@ -291,7 +293,8 @@ async function runBrowserAudit(outputRoot) {
       '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
       `--user-data-dir=${profileDirectory}`, 'about:blank',
     ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, TEMP: runDirectory, TMP: runDirectory, TMPDIR: runDirectory } });
-    browserExit = once(browser, 'exit').catch((error) => { browserStderr += String(error); });
+    watchOwnedBrowser(ownedRun, browser);
+    browser.on('error', error => { browserStderr += String(error); });
     browser.stderr.on('data', (chunk) => { browserStderr = (browserStderr + chunk).slice(-4000); });
     let debuggerPort;
     const debuggerDeadline = Date.now() + 15000;
@@ -499,19 +502,32 @@ async function runBrowserAudit(outputRoot) {
     process.exitCode = 1;
     emit({ status: 'FAIL', name: 'browser regression', details: String(error.stack || error) });
   } finally {
+    const browserState = await finishOwnedBrowser(ownedRun, cdp ? () => cdp.send('Browser.close') : null);
     cdp?.close();
-    if (browser && browser.exitCode === null) {
-      browser.kill();
-      await Promise.race([browserExit, new Promise((resolve) => setTimeout(resolve, 3000))]).catch(() => {});
+    if (browser && !browserState.exited) {
+      browser.unref();
+      browser.stderr?.destroy();
     }
-    await vite?.close();
-    if (server) {
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
-    }
-    if (summary.evidencePath) {
-      await writeFile(path.join(summary.evidencePath, 'browser-stderr.txt'), browserStderr);
-      await writeFile(path.join(summary.evidencePath, 'result.json'), JSON.stringify({ ...summary, events }, null, 2));
+    let viteClosed = false;
+    try { await vite?.close(); viteClosed = !!vite; }
+    catch { process.stdout.write('Cache cleanup: Vite shutdown unconfirmed; caches preserved\n'); }
+    try {
+      if (server) {
+        server.closeAllConnections();
+        await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      }
+    } catch { viteClosed = false; }
+    let cleanup;
+    try {
+      if (summary.evidencePath) {
+        await writeFile(path.join(summary.evidencePath, 'browser-stderr.txt'), browserStderr);
+        await writeFile(path.join(summary.evidencePath, 'result.json'), JSON.stringify({ ...summary, events }, null, 2));
+        cleanup = await cleanupOwnedBrowserCaches(ownedRun, { includeVite: true, viteClosed,
+          viteCacheDirectory: ownedRun.viteCacheDirectory });
+      }
+    } finally {
+      process.stdout.write(`${JSON.stringify({ stage: 'browser-cache-cleanup', browser: browserState,
+        cleanup: cleanup ?? { status: 'SKIPPED', reason: 'EVIDENCE_NOT_SAVED' } })}\n`);
     }
     process.stdout.write(`${JSON.stringify(summary)}\n`);
   }

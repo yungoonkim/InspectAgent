@@ -1,3 +1,4 @@
+
 """Configuration module for InspectAgent.
 
 Supports local development and Google Cloud Run deployment environments.
@@ -9,8 +10,10 @@ import os
 from pathlib import Path
 from typing import Optional
 
+
 # Base project directory
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,18 +27,30 @@ try:
         APP_VERSION: str = "0.1.0"
         ENVIRONMENT: str = Field(default="local", description="local | cloudrun | production")
         HOST: str = Field(default="0.0.0.0", description="Host address to bind")
-        PORT: int = Field(default_factory=lambda: int(os.getenv("PORT", "8000")), description="Server port (Cloud Run sets PORT automatically)")
+        PORT: int = Field(
+            default_factory=lambda: int(os.getenv("PORT", "8000")),
+            description="Server port (Cloud Run sets PORT automatically)",
+        )
 
         # AI Agent / Gemini Model Configuration
-        # Must strictly use gemini-3.8-flash as per project requirements
+        # Model name is preserved from the existing project configuration.
         GEMINI_MODEL: str = Field(default="gemini-3.8-flash", description="Target Gemini model name")
         GEMINI_API_KEY: Optional[str] = Field(default=None, description="Google Gemini API Key")
+
+        # Gemini Vision Review: live calls remain opt-in by default.
+        # A local .env can set VISION_REVIEW_LIVE_ENABLED=true.
+        VISION_REVIEW_LIVE_ENABLED: bool = Field(default=False)
+        VISION_REVIEW_MODEL: str = Field(default="gemini-3.8-flash")
+        VISION_REVIEW_TIMEOUT_SECONDS: float = Field(default=30, gt=0)
+        QUALITY_SHADOW_ENABLED: bool = Field(default=False)
+        JUDGE_ASSISTED_WORKFLOW_ENABLED: bool = Field(default=False)
+
         AGENT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=1, le=10)
         AGENT_MAX_TOOL_CALLS: int = Field(default=8, ge=1, le=30)
         AGENT_MAX_REPEAT_CALLS: int = Field(default=2, ge=1, le=3)
         AGENT_REQUEST_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=180)
         AGENT_MODEL_TIMEOUT_SECONDS: float = Field(default=15, gt=0, le=60)
-        AGENT_FINAL_MODEL_TIMEOUT_SECONDS: int = Field(default=15, ge=1, le=30)
+        AGENT_FINAL_MODEL_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=30)
         AGENT_TOOL_TIMEOUT_SECONDS: float = Field(default=3, gt=0, le=10)
         AGENT_MAX_PAYLOAD_BYTES: int = Field(default=65536, ge=1024, le=262144)
 
@@ -160,7 +175,8 @@ try:
             self.absolute_patchcore_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
 except ImportError:
-    # Fallback when pydantic-settings is not yet installed
+    # Fallback when pydantic-settings is not yet installed.
+    # Without pydantic-settings, this branch reads process environment variables.
     class Settings:  # type: ignore[no-redef]
         """Fallback settings using os.getenv when dependencies are pending installation."""
 
@@ -172,12 +188,23 @@ except ImportError:
             self.PORT = int(os.getenv("PORT", "8000"))
             self.GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
             self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+            self.VISION_REVIEW_LIVE_ENABLED = os.getenv(
+                "VISION_REVIEW_LIVE_ENABLED", "false"
+            ).lower() in ("1", "true", "yes")
+            self.VISION_REVIEW_MODEL = os.getenv("VISION_REVIEW_MODEL", "gemini-3.8-flash")
+            self.VISION_REVIEW_TIMEOUT_SECONDS = float(
+                os.getenv("VISION_REVIEW_TIMEOUT_SECONDS", "30")
+            )
+            if self.VISION_REVIEW_TIMEOUT_SECONDS <= 0:
+                raise ValueError("INVALID_VISION_REVIEW_TIMEOUT")
+            self.QUALITY_SHADOW_ENABLED = os.getenv("QUALITY_SHADOW_ENABLED", "false").lower() in ("1", "true", "yes")
+            self.JUDGE_ASSISTED_WORKFLOW_ENABLED = os.getenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", "false").lower() in ("1", "true", "yes")
             self.AGENT_MAX_TOOL_ROUNDS = int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "4"))
             self.AGENT_MAX_TOOL_CALLS = int(os.getenv("AGENT_MAX_TOOL_CALLS", "8"))
             self.AGENT_MAX_REPEAT_CALLS = int(os.getenv("AGENT_MAX_REPEAT_CALLS", "2"))
             self.AGENT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("AGENT_REQUEST_TIMEOUT_SECONDS", "60"))
             self.AGENT_MODEL_TIMEOUT_SECONDS = float(os.getenv("AGENT_MODEL_TIMEOUT_SECONDS", "15"))
-            self.AGENT_FINAL_MODEL_TIMEOUT_SECONDS = int(os.getenv("AGENT_FINAL_MODEL_TIMEOUT_SECONDS", "15"))
+            self.AGENT_FINAL_MODEL_TIMEOUT_SECONDS = int(os.getenv("AGENT_FINAL_MODEL_TIMEOUT_SECONDS", "30"))
             if not 1 <= self.AGENT_FINAL_MODEL_TIMEOUT_SECONDS <= 30:
                 raise ValueError("INVALID_FINAL_MODEL_TIMEOUT")
             self.AGENT_TOOL_TIMEOUT_SECONDS = float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "3"))
@@ -270,7 +297,6 @@ except ImportError:
             self.absolute_inspections_path.parent.mkdir(parents=True, exist_ok=True)
             self.absolute_inspection_logs_path.parent.mkdir(parents=True, exist_ok=True)
             self.absolute_patchcore_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-
 
 
 @lru_cache()

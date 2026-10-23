@@ -1,21 +1,27 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
 interface Props {
   grabPanel: ReactNode;
   judgePanel: ReactNode;
   staticImagePanel: ReactNode;
+  requestedGrabStage?: { stage: 'patchcore' | 'judge' };
 }
 
 type InspectionTab = 'grab' | 'static';
 
-export function InspectionTabs({ grabPanel, judgePanel, staticImagePanel }: Props) {
+export function InspectionTabs({ grabPanel, judgePanel, staticImagePanel, requestedGrabStage }: Props) {
   const [activeTab, setActiveTab] = useState<InspectionTab>('grab');
   const [activeGrabTab, setActiveGrabTab] = useState<'patchcore' | 'judge'>('patchcore');
   const grabButton = useRef<HTMLButtonElement>(null);
   const staticButton = useRef<HTMLButtonElement>(null);
   const patchcoreButton = useRef<HTMLButtonElement>(null);
   const judgeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!requestedGrabStage) return;
+    setActiveTab('grab');
+    setActiveGrabTab(requestedGrabStage.stage);
+  }, [requestedGrabStage]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, tab: InspectionTab) => {
     let nextTab: InspectionTab;

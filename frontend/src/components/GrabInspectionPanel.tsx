@@ -5,7 +5,7 @@ import type { ManualOutcome, ReinspectionGroup } from '../types/reinspection';
 import { createGrabInspection, getCaptureReinspectionGroup, getInspection, getReinspectionGroup, saveManualReview } from '../api/inspection';
 import { cropIdentity, isGrabInspectionMatching, GRAB_LIMITATION } from '../utils/grabInspectionState';
 import { inspectionQualitySummary } from '../utils/inspectionQualitySummary';
-import { canUseCapture, grabInspectionDisabled, inspectionProgress, MANUAL_DEFAULT } from '../utils/reinspectionState';
+import { canUseCapture, grabInspectionDisabled, inspectionProgress, isJudgeAssisted, MANUAL_DEFAULT } from '../utils/reinspectionState';
 import { getCaptureMetadata } from '../api/video';
 import {
   canPrepareNewProduct, clearWorkflowHints, GROUP_HINT_KEY, PENDING_CAPTURE_HINT_KEY,
@@ -20,13 +20,14 @@ interface Props {
   onSelectionStart: () => number;
   onInspectionChange: (inspection: InspectionResponse, version?: number) => void;
   onGroupChange?: (group: ReinspectionGroup | null) => void;
+  onRequestJudge?: () => void;
 }
 
 const storageKey = GROUP_HINT_KEY;
 const pendingKey = PENDING_CAPTURE_HINT_KEY;
 const requestId = () => crypto.randomUUID().replaceAll('-', '');
 
-export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, currentInspection = null, onSelectionStart, onInspectionChange, onGroupChange }: Props) {
+export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, currentInspection = null, onSelectionStart, onInspectionChange, onGroupChange, onRequestJudge }: Props) {
   const [productId, setProductId] = useState('ABCD1541');
   const [group, setGroup] = useState<ReinspectionGroup | null>(null);
   useEffect(() => { onGroupChange?.(group); }, [group, onGroupChange]);
@@ -169,7 +170,7 @@ export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, curre
 
   const startNewProduct = async () => {
     if (!crop || !manualMode || busyRef.current || restoring || !canPrepareNewProduct(blocked, lookupProblem)) return;
-    if (!window.confirm('같은 제품의 재검사가 아니라 새 제품의 최초 검사를 시작합니까? 기존 그룹·3회 제한·수동 확인 기록은 그대로 보존됩니다. 현재 Capture를 서버에서 확인하며 검사는 아직 실행하지 않습니다.')) return;
+    if (!window.confirm('새 제품의 최초 검사를 시작합니까? 기존 그룹·검사·수동 확인 기록과 레거시 정책은 그대로 보존됩니다. 현재 Capture를 서버에서 확인하며 검사는 아직 실행하지 않습니다.')) return;
     const key = currentKey;
     busyRef.current = true;
     setBusy(true);
@@ -240,7 +241,7 @@ export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, curre
         <input aria-label="Grab 제품 ID" value={productId} disabled={busy || !!group || restoring} onChange={event => setProductId(event.target.value)} />
       </label>
       <div role="status" className="grab-panel-status">{inspectionProgress({ group, restoring, blocked, hasCrop: !!crop, ready: !inspectDisabled })}</div>
-      {group?.status === 'RETRY_ALLOWED' && <label className="grab-panel-checkbox">
+      {!isJudgeAssisted(group) && group?.status === 'RETRY_ALLOWED' && <label className="grab-panel-checkbox">
         <input aria-label="동일 제품 재검사 확인" type="checkbox" checked={sameProduct} onChange={event => setSameProduct(event.target.checked)} disabled={busy} />
         <span>동일한 실제 제품의 재검사임을 확인합니다. 기존 ROI를 유지하고 다른 영상 프레임을 새로 Grab하세요. 같은 Crop의 Gemini 2차 분석은 재검사 횟수에 포함하지 않습니다.</span>
       </label>}
@@ -283,6 +284,10 @@ export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, curre
         </div>
         {matchingInspection.final_result === 'REINSPECT' && matchingInspection.final_reason_code === 'IMAGE_QUALITY_WARNING'
           && <p className="grab-panel-note grab-panel-warning">영상 품질 경고가 모델 OK/NG보다 우선 적용되었습니다. 원본 모델 판정은 변경되지 않습니다.</p>}
+        {matchingInspection.final_result === 'REINSPECT' && onRequestJudge && <>
+          <p className="grab-panel-note">2차 Gemini Judge는 선택 사항입니다. 비활성·실패·미실행이어도 신규 정책의 3차 작업자 확인을 진행할 수 있습니다.</p>
+          <button type="button" className="btn btn-outline" disabled={busy} onClick={onRequestJudge}>2차 Gemini Judge 보기 (선택)</button>
+        </>}
       </div>}
       {message && <div role="status" className="grab-panel-note grab-panel-warning">{message}</div>}
       {group && <div className="grab-panel-history">
@@ -297,7 +302,8 @@ export function GrabInspectionPanel({ crop, enabled, manualMode = enabled, curre
         </li>)}</ul>
       </div>}
       {group?.status === 'MANUAL_REVIEW_REQUIRED' && <fieldset className="grab-panel-manual" disabled={busy || !manualMode}>
-        <legend>자동 재검사 한도 도달 · 작업자 확인 필요</legend>
+        <legend>{isJudgeAssisted(group) ? '3차 작업자 최종 확인 · Gemini 실행 불필수' : '레거시 재검사 한도 도달 · 작업자 확인 필요'}</legend>
+        <p className="grab-panel-caption">대상 검사: {group.current_inspection_id} · 서버 원판정 REINSPECT는 유지됩니다.</p>
         <p className="grab-panel-caption">개발용 자기신고 수동 확인입니다. 인증된 공장 품질 승인이나 설비 제어가 아닙니다.</p>
         <label className="grab-panel-field">수동 결과 <select aria-label="수동 결과" value={manualResult} onChange={event => setManualResult(event.target.value as ManualOutcome)}><option value="HOLD">HOLD</option><option value="MANUAL_OK">MANUAL_OK</option><option value="MANUAL_NG">MANUAL_NG</option></select></label>
         <label className="grab-panel-field">작업자 표시명 <input aria-label="작업자 표시명" maxLength={64} value={operator} onChange={event => setOperator(event.target.value)} /></label>

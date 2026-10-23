@@ -223,6 +223,16 @@ class VisionReviewService:
         self._live_api_key = live_api_key
 
     @classmethod
+    def from_settings(cls, root, settings):
+        policy = VisionPolicy(model=settings.VISION_REVIEW_MODEL,
+                              timeout_seconds=settings.VISION_REVIEW_TIMEOUT_SECONDS)
+        api_key = settings.GEMINI_API_KEY
+        enabled = (settings.VISION_REVIEW_LIVE_ENABLED is True
+                   and isinstance(api_key, str) and bool(api_key.strip())
+                   and policy.model in SUPPORTED_MODELS)
+        return cls(root, policy, live_api_key=api_key if enabled else None)
+
+    @classmethod
     def from_environment(cls, root, api_key):
         model = os.getenv("VISION_REVIEW_MODEL", SUPPORTED_MODEL)
         try:

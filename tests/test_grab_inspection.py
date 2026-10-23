@@ -36,6 +36,7 @@ class MockInferencer:
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
     settings = Settings(_env_file=None, OUTPUT_DIR=str(tmp_path), ENABLE_PATCHCORE=True,
+                        JUDGE_ASSISTED_WORKFLOW_ENABLED=False,
                         BRIGHTNESS_LOW_THRESHOLD=125, BRIGHTNESS_HIGH_THRESHOLD=150)
     clock = [1000.0]
     captures = CaptureStore(tmp_path / "captures", clock=lambda: clock[0])

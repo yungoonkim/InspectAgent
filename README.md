@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.6.0-EE4C2C.svg)](https://pytorch.org/)
 [![Anomalib](https://img.shields.io/badge/Anomalib-PatchCore-orange.svg)](https://github.com/openvinotoolkit/anomalib)
-[![Tests](https://img.shields.io/badge/pytest-1089%20passed%20%2F%204%20skipped-brightgreen.svg)]()
+[![Day4 Tests (2026-10-17)](https://img.shields.io/badge/Day4_tests-1089%20passed%20%2F%204%20skipped-brightgreen.svg)](docs/day4-step5-final-verification.md)
 
 ---
 
@@ -40,11 +40,14 @@ PatchCore와 백엔드가 판정을 확정하며 Agent는 이를 변경하지 �
   - **Step 4 완료:** 운영 Agent에서 단순 JSON → Fact Catalog 참조 복원 → `DiagnosisDraft` → Pydantic/Evidence/Pointer 검증을 연결했고 T01/T03/T05/T06 실제 성공 회차를 확인했습니다.
   - **Step 5 완료:** 최종 전체 오프라인 **1089 PASS / 0 FAIL / 4 SKIP / 경고 2건**. SKIP은 T03 이미지 의존 Day3.5 통합 테스트이며 보안·Agent 필수 검증은 통과했습니다.
   - [최종 완료 보고서](docs/day4-step5-final-verification.md)와 [과거 실패·실서버 기록](docs/day4-step4-gemini-validation.md)을 구분합니다. Day4 완료는 배포 완료가 아닙니다.
-- **향후 구현 예정 (별도 승인, Day 5 ~ Day 7):**
-  - **신규 영상 검사 확장:** 컨베이어 동영상 Live View, 프레임 Grab, ROI 선택 기반 PatchCore 및 Gemini 재진단
-  - **Day 5:** 상황별 추가 조사, 반례 평가 및 가설 검증
-  - **Day 6:** React/TypeScript 기반 검사 관제 웹 대시보드 구축 (Live View & Grab View 포함)
-  - **Day 7:** Google Cloud Run 컨테이너 배포 및 영구 저장소(Cloud Storage) 전환
+- **2026-10-23 제출 준비 시점의 구현 범위:**
+  - React/TypeScript LiveView·영상 선택·재생·Pause·프레임 이동, MANUAL Grab·ROI 검사 및 정적 이미지 검사 UI가 구현되어 있습니다.
+  - Heatmap·Zoom/Pan·Pixel Inspector, 병 Edge 후보·신뢰도·영역별 GV, Gemini Vision Judge와 Diagnostic Agent의 명시적 실행·저장 결과 조회가 구현되어 있습니다. Edge/GV는 참고 정보이며 새 제품 판정 기준이 아닙니다.
+  - Quality Shadow Metrics는 기본 OFF이며 판정과 분리된 Sidecar를 저장합니다. **A-3-2 전체 상태는 PARTIAL**입니다.
+  - 신규 RIG는 기본 `judge-assisted-v1` 정책으로 최초 정상 완료 검사 한 건을 기준으로 진행합니다. REINSPECT이면 Gemini Judge는 선택적으로 실행하고, Gemini 미실행·비활성·실패여도 작업자가 `MANUAL_OK` / `MANUAL_NG` / `HOLD`를 명시적으로 저장할 수 있습니다. 프론트엔드 연동과 격리 검증을 수행했으며 실행 중 서버 반영·실제 LIVE 호출은 별도입니다. 기존 RIG의 3회 정책과 이력은 유지합니다.
+  - AUTO 연속 검사, 실제 카메라·PLC·배출 장치 제어, Cloud Run 실제 배포·GCS 영구 저장 전환은 미구현 또는 후속 검증 대상입니다. [개선 이력](docs/progress/visioninsight-improvement-log.md)을 참조하세요.
+
+위 Day4 수치는 과거 검증 기록입니다. **2026-10-23 제출 준비 Step 2는 정적 점검 범위였으며, 이후 Judge/RIG 수정의 격리 회귀·사본 빌드는 8.7에 별도로 기록합니다. 실제 추론·외부 호출 성공을 뜻하지 않습니다.**
 
 | 실제 Gemini 대표 성공 | 검사 ID | 서버 최종 판정 | FastAPI / 분석 상태 | 전체 시간 | 검증 Fact |
 |---|---|---|---|---|---|
@@ -93,19 +96,19 @@ flowchart TD
 
 ## 3. 기술 스택
 
-### 백엔드 및 머신러닝 (현재 활성화)
+### 백엔드 및 머신러닝 (선언된 실행 구성)
 - **Language & Runtime:** Python 3.11 (Miniconda `vision-insight`)
 - **Web API Framework:** FastAPI 0.115+, Uvicorn, Pydantic v2
-- **Computer Vision:** OpenCV (`opencv-python-headless` 4.10+)
-- **Deep Learning Inference:** PyTorch 2.6.0 (CPU 빌드), torchvision 0.21.0
-- **Anomaly Detection:** Anomalib 1.2+ (PatchCore, ResNet-18 Backbone, Coreset Subsampling)
-- **Testing:** pytest 9.1+, TestClient (HTTPX)
+- **Computer Vision:** `opencv-python-headless>=4.9.0.80`
+- **Deep Learning Inference:** 제출용 CPU 선언은 `torch==2.6.0+cpu`, `torchvision==0.21.0+cpu` (기존 개발 환경의 설치 빌드와 다를 수 있음)
+- **Anomaly Detection:** `anomalib==2.7.0`, `timm==1.0.30` (PatchCore, ResNet-18)
+- **Testing:** `pytest>=8.0.0`, TestClient (HTTPX)
 - **Containerization:** Docker (`python:3.11-slim`), Linux Debian 기반
 
-### AI Agent (구현 완료) 및 웹·클라우드 (후속 검증)
+### AI Agent·웹 (구현) 및 클라우드 (배포 준비)
 - **AI Agent:** Google Gemini (`gemini-3.8-flash`, `google-genai==2.31.0`, 수동 Function Calling)
 - **Frontend:** React, TypeScript, Vite
-- **Cloud Infrastructure:** Google Cloud Run (Serverless CPU), Artifact Registry, Cloud Storage (GCS)
+- **Cloud Infrastructure:** Google Cloud Run, Artifact Registry, Cloud Storage는 배포 계획이며 실제 배포 완료로 표시하지 않습니다.
 
 ---
 
@@ -190,21 +193,123 @@ VisionInsight는 판정의 모호함을 방지하기 위해 **제품 결함 여�
 
 ## 8. 로컬 개발 환경 및 실행 가이드
 
-### 8.1 Conda 가상환경 준비
-```bash
-# vision-insight 환경 활성화 (Python 3.11)
+### 8.1 Windows 환경 및 Python 의존성 설치
+
+대상은 **Windows x64 + Miniconda Python 3.11**, CPU 추론 구성입니다. 아래는 제출본 실행 절차이며 **이번 작업에서 설치·기동 성공을 확인한 명령이 아닙니다.** 기존 개발 서버·Conda 환경에 덮어 설치하지 말고 승인된 별도 검증 PC/VM을 사용하세요. 프로젝트 루트는 `backend/`, `frontend/`, requirements 파일이 있는 디렉터리입니다.
+
+새 환경에서만 생성하며 기존 `vision-insight` 환경을 재생성하지 않습니다.
+
+```cmd
+cd /d "<압축 해제한 InspectAgent 경로>"
+conda create -n vision-insight python=3.11
 conda activate vision-insight
+python --version
+python -m pip --version
 
-# 의존성 설치 (개발 환경)
-pip install -r requirements.txt
+python -m pip install -r requirements-prod.txt -r requirements.txt
+python -m pip check
 ```
 
-### 8.2 FastAPI 서버 실행
-```bash
-# 개발 모드 실행 (backend 폴더 감시, uvicorn 자동 재시작)
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend
+- `requirements-prod.txt`: CPU Torch/Torchvision·Anomalib/Timm·API·DB·Gemini 런타임입니다. CPU 휠 추가 인덱스가 파일에 선언되어 있습니다.
+- `requirements.txt`: API·영상·설정·pytest/HTTPX이며 `requirements-db.txt`를 포함합니다. **이 파일만 설치하면 ML 의존성이 빠집니다.** `ENABLE_PATCHCORE=false`여도 최상위 Torch import가 있어 패키지 누락을 해결하지 못합니다.
+- 두 파일을 한 resolver에 전달해 CPU 버전 고정과 테스트 의존성을 함께 적용합니다. 새 환경 설치와 기존 런타임에 테스트 패키지만 추가하는 경우를 구분하세요.
+- CPU 휠의 Windows x64/Python 3.11 설치·전이 의존성 충돌·새 머신의 모델 캐시 요구사항은 **NOT_VERIFIED**입니다. `>=` 항목도 있어 완전한 Python lock이 아닙니다. 다른 OS/아키텍처의 재현성은 보장하지 않습니다.
+
+### 8.2 Backend·Frontend 실행
+
+#### 설정 및 Backend (프로젝트 루트)
+
+기본값은 `backend/config.py`, 비밀값 없는 예시는 [.env.example](.env.example)입니다. 기본 로컬 기동에 `.env` 복사가 필수는 아닙니다. 예제 DB URL·토큰 placeholder는 실행 가능한 인증정보가 아니며 미사용 DB 설정은 넣지 마세요. **기존 `.env`·`.env.roi-db.local`은 덮어쓰거나 제출하지 않습니다.**
+
+일반 Settings와 HTTP Vision Judge는 **OS 환경변수 > 루트 `.env` > 코드 기본값** 순으로 읽고 캐시합니다. ROI는 OS 환경변수가 우선이며 파일 간에는 `.env.roi-db.local`이 `.env`보다 우선합니다. 실행 중 서버 값은 현재 디스크 설정과 다를 수 있습니다. `.env`를 수정해도 기존 프로세스에 자동 적용되지 않습니다.
+
+새 실행 세션의 기본 예시입니다. 기존 서버가 포트를 사용 중이면 중복 기동·임의 재시작하지 마세요.
+
+```cmd
+cd /d "<압축 해제한 InspectAgent 경로>"
+conda activate vision-insight
+set "QUALITY_SHADOW_ENABLED=false"
+set "JUDGE_ASSISTED_WORKFLOW_ENABLED=true"
+set "VISION_REVIEW_LIVE_ENABLED=false"
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
-- 서버가 기동되면 FastAPI lifespan에 의해 PatchCore 모델(`patchcore_bottle.ckpt`)이 메모리에 싱글톤으로 사전 적재됩니다 (최초 기동 시간: 약 3.8초).
+
+사용자가 기존에 사용한 **Shadow ON 실행 방식**은 다음과 같습니다. 명령 안내는 현재 서버 활성화·재시작 승인이나 새 검사 승인이 아닙니다.
+
+```cmd
+conda activate vision-insight
+set "QUALITY_SHADOW_ENABLED=true"
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+- Backend: `http://127.0.0.1:8000`, API 문서: `http://127.0.0.1:8000/docs`.
+- 신규 정책의 코드 기본값은 `JUDGE_ASSISTED_WORKFLOW_ENABLED=true`입니다. 명시적 `false`는 새 그룹도 레거시 정책으로 생성하는 호환 옵션이며 기존 그룹은 이 설정 변경과 무관하게 생성 당시 정책을 유지합니다. 신규 그룹은 `max_attempts`·`remaining_attempts`가 `null`이며 완료 검사 한 건 이후 제품 Retry를 반복하지 않습니다. ERROR·저장 미확정은 정상 REINSPECT 수동 승인 경로와 분리하고, 동일 Capture 중복 추론 방지를 유지합니다.
+- 기본 `ENABLE_PATCHCORE=true`에서 lifespan이 Checkpoint를 적재합니다. `/health` 성공만으로 모델 적재·추론 성공을 보장하지 않습니다. Checkpoint와 Metadata를 함께 준비하세요.
+- 제출 시연은 `--reload`를 사용하지 않습니다. Capture 세션은 메모리 기반이며 종료 시 소실됩니다. 종료 시 관리 중 PNG가 삭제되고 새 Store 디렉터리 초기화·TTL 정리에서도 임시 PNG가 삭제될 수 있습니다. **F5도 세션 bootstrap을 요청하므로 운영 서버에서 무해한 조회로 취급하지 마세요.** PNG 백업만으로 소유 세션을 복원할 수 없습니다.
+- Shadow는 원본 Crop 해상도로 계산하며 판정·기존 JSONL/API를 변경하지 않습니다. 기본 OFF이며 저장 위치는 `OUTPUT_DIR/quality_shadow_metrics/quality-shadow-v1/opencv-original-exact-variance-v1/<inspection_id>/<crop_sha256>.json`입니다. A-3-2의 미완료 수락 항목은 남아 있습니다.
+
+#### Frontend (별도 CMD)
+
+잠금된 Vite 8.3.4의 Node 요구사항은 **`^20.19.0 || >=22.12.0`**입니다. 현재 개발 PC의 Node 24.11.0은 범위에 들어가지만 새 머신의 설치·빌드는 미검증입니다. 지원 범위의 Node LTS와 함께 제공되는 npm을 사용하고 버전을 기록하세요. 프로젝트에 별도 `engines`/`packageManager` 고정은 없습니다.
+
+```cmd
+cd /d "<압축 해제한 InspectAgent 경로>\frontend"
+node --version
+npm --version
+npm ci
+npm run dev
+```
+
+- 접속: **`http://localhost:5173`**. PowerShell에서 npm 실행이 차단되면 CMD 또는 `npm.cmd`를 사용하세요.
+- `node_modules/`는 ZIP에 없어도 정상입니다. 잠금 파일로 `npm ci`가 성공하는지가 기준입니다. Vite는 devDependency이므로 개발 실행·빌드에서 `--omit=dev`를 사용하지 마세요. `'vite'을 찾을 수 없음`이면 경로·Node 버전·설치 성공 여부·devDependency 제외 설정부터 확인합니다. 전역 Vite 설치·lock 삭제로 우회하지 마세요.
+- API는 `VITE_API_BASE_URL` 또는 기본 `/api`입니다. 현재 Vite는 `/api`를 `127.0.0.1:8000`으로 프록시하고 Origin을 `http://localhost:5173`으로 설정합니다. 포트·호스트 변경 시 CORS·쿠키·Origin·ROI 허용 Origin을 함께 검증해야 합니다.
+- `npm run build`는 TypeScript 검사와 Vite 빌드이며 **후속 격리 검증 항목(이번에는 미실시)**입니다. `dist/`의 별도 정적 호스팅은 API 라우팅 검증이 필요합니다. Google Fonts는 외부 요청이며 로컬 번들 자산이 아닙니다.
+- 페이지 진입은 Capture 세션 발급을 요청합니다. 첫 검증은 비어 있는 별도 `CAPTURE_DIR`와 승인된 제출 자료 사본을 사용하며 기존 운영 서버에 브라우저를 연결하지 마세요.
+
+#### 선택적 PostgreSQL ROI 관리
+
+PostgreSQL은 **ROI 설정 저장·버전·승인·활성화 관리**에 필요합니다. 영상 재생·수동 ROI 기반 Grab과 별도이며 DB는 해당 관리 요청 시 연결됩니다. DB 미설정은 관리 API 503, 인증 불일치는 401/403 등으로 제한됩니다. DB 라이브러리는 Backend import에 필요하므로 설치에서 빼지 마세요.
+
+신규·독립 DB를 승인한 경우에만 다음 순서를 사용합니다. 기존 DB에 대한 초기화 명령이 아닙니다.
+
+```cmd
+python scripts/setup_roi_database.py prepare
+docker compose --env-file .env.roi-db.local -f compose.roi-db.yaml up -d
+python scripts/setup_roi_database.py initialize
+python -m alembic upgrade head
+python scripts/setup_roi_database.py grants
+```
+
+`prepare`는 기존 `.env.roi-db.local`이 있으면 중단합니다. 생성한 비밀값은 공유하지 않으며 운영자가 중립 제품 ID 목록을 등록해야 합니다. Compose의 `127.0.0.1:55432`·컨테이너명·볼륨명은 고정입니다. **프로젝트명만 바꿔도 완전히 격리되지 않으므로 기존 DB가 있는 PC에서는 그대로 실행하지 마세요.** [ROI API 계약](docs/roi-postgresql-api.md)과 [마이그레이션](migrations/env.py)을 참조하세요. 이번에는 DB 연결·명령 실행을 하지 않았습니다.
+
+#### 선택적 Gemini 설정 및 timeout
+
+API 키 없이도 기존 검사는 가능하지만 Diagnostic Agent LIVE는 `MISSING_API_KEY`(503)로 제한되고 Judge LIVE는 비활성화됩니다. 모델 접근 권한·Google 가용성은 별도입니다. 키를 `VITE_` 변수·브라우저 번들·문서에 넣지 마세요.
+
+| 구분 | 현재 코드 계약 |
+|---|---|
+| Diagnostic Agent | `GEMINI_API_KEY`, `GEMINI_MODEL`. 조사 요청 기본 15초, 최종 JSON 상한 기본 30초, 전체 60초. 최종 요청은 잔여 시간에서 예비 2초를 뺀 범위로 제한 |
+| Vision Judge | HTTP 경로는 `VisionReviewService.from_settings()`로 동일 서버 Settings를 사용. LIVE 기본 `false`, 모델 기본 `gemini-3.8-flash`, timeout 기본 30초. `GEMINI_API_KEY`가 비어 있거나 모델이 허용 목록 밖이면 차단 |
+| 설정 회귀 수정 | 이전 HTTP 경로는 `.env`를 읽는 Settings와 달리 LIVE·모델·timeout을 OS에서만 다시 읽어 `.env`의 LIVE 허용을 누락했음. 이제 HTTP 경로는 Settings 우선순위를 따름. 직접 호출용 `from_environment()`는 이전 계약 호환을 위해 유지 |
+| Vision 모델·timeout | 허용 모델은 `gemini-3.8-flash`와 `gemini-4-argon`, 서비스 timeout 유효 범위는 0초 초과·30초 이하. 실제 Google 모델 접근 가능성·LIVE 성공은 이번 수정에서 검증하지 않음 |
+
+Judge를 30초로 사용할 때는 사용자 승인 후 **새 Backend CMD에** 다음을 명시합니다. 키는 사용자 로컬 비밀 설정으로 별도 제공하며 기존 서버를 강제 재로드하지 않습니다.
+
+```cmd
+set "VISION_REVIEW_MODEL=gemini-3.8-flash"
+set "VISION_REVIEW_TIMEOUT_SECONDS=30"
+set "VISION_REVIEW_LIVE_ENABLED=true"
+```
+
+키는 로컬 `.env`의 `GEMINI_API_KEY` 또는 해당 CMD의 같은 이름 환경변수로 제공하세요. 기존 프로세스에만 키가 있었다면 새 CMD가 이를 상속한다고 가정하지 않습니다. 비밀값은 출력하거나 공유하지 마세요. `GOOGLE_API_KEY`는 이 애플리케이션의 Judge 키 설정으로 사용하지 않습니다. OS의 `VISION_REVIEW_LIVE_ENABLED=false`는 `.env`의 `true`보다 우선합니다.
+
+버튼은 소유 세션·현재 REINSPECT 검사·영구 Crop SHA256 연결·지원 Capability·LIVE 설정·유효 키·미사용 요청·해당 Crop 전송 동의가 모두 맞을 때 활성화됩니다. 외부 이미지 전송은 Crop별 동의 후 LIVE 버튼으로 명시 실행합니다. 탭 전환·품질 경고만으로 자동 호출하지 않습니다. Judge는 독립 참고 의견이며 서버/작업자 판정을 덮어쓰지 않습니다. 분석 실패는 `ANALYSIS_FAILED`와 `judge_verdict=null`로 구분하며 자동 재호출하지 않습니다.
+
+신규 정책에서는 1차 검사 패널의 **2차 Gemini Judge 보기 (선택)**와 Judge 패널의 **3차 작업자 확인으로 이동**으로 이동합니다. Gemini가 없거나 실패해도 작업자 표시명·판단 사유·명시적 결과를 입력해 확인할 수 있습니다. 시스템의 `MANUAL_REVIEW_REQUIRED`와 작업자가 저장하는 `HOLD`는 별개입니다. HOLD는 보류 이력을 남기며 이후 새 버전으로 명시적인 결정을 할 수 있습니다. 저장된 서버 `final_result`는 계속 REINSPECT입니다.
+
+기존 그룹/대기 Capture의 localStorage 힌트는 자동 삭제하지 않습니다. **새 제품 검사 시작**은 확인 대화상자와 현재 Capture의 서버 소유권·출처·미사용 검증 후 로컬 선택만 전환하며 과거 RIG를 변경하지 않습니다. 새 브라우저에서 소유 세션이 필요한 기존 Grab/Judge 조회는 파일 존재만으로 보장되지 않습니다.
+
+이번 수정은 실행 중 Uvicorn을 재시작하지 않았습니다. `--reload`가 없는 기존 서버에는 코드 변경이 적용되지 않으므로 Capture·진행 중 작업을 확인하고 별도 재시작 승인이 필요합니다. 실제 Gemini 호출도 별도 승인 대상이며 모의 검증을 LIVE 성공으로 표시하지 않습니다. 기존 제출 ZIP은 변경하지 않았으므로 최신 수정 반영본을 제출하려면 별도로 재패키징해야 합니다.
 
 ### 8.3 주요 API 엔드포인트 및 호출 예시
 
@@ -247,7 +352,7 @@ curl -X POST http://localhost:8000/inspections \
 #### 4) 검사 사후 이상 진단 요청 (`POST /analyze/{inspection_id}`)
 실제 분석에는 서버의 `GEMINI_API_KEY`와 `GEMINI_MODEL` 설정이 필요하며 유료 Gemini 요청이 발생할 수 있습니다. 키를 브라우저·문서·Git에 넣지 마세요. 아래는 호출 예시이며 실제 실행은 별도 승인 대상입니다. 키가 없으면 분석만 503으로 실패하고 기존 검사 API는 유지됩니다.
 
-기본 조사/최종 JSON은 각각 15초, 전체 60초·여유 2초·재시도 0회입니다. `AGENT_FINAL_MODEL_TIMEOUT_SECONDS=30`은 승인된 특정 검증 회차의 자식 프로세스에서만 선택하며 모든 요청의 기본값이 아닙니다.
+현재 코드 기본값은 조사 모델 요청 15초, 최종 JSON 상한 30초, 전체 60초·최종 예비 2초·자동 재시도 0회입니다. 최종 요청은 남은 전체 예산으로 제한됩니다. 이는 Diagnostic Agent 계약이며 Vision Judge의 OS 변수·fallback 차이는 위 실행 안내를 참조하세요. 과거 회차의 15초 설정과 현재 기본값을 구분합니다.
 
 ```bash
 curl -X POST http://localhost:8000/analyze/INSP-000001
@@ -299,9 +404,9 @@ curl -X POST http://localhost:8000/analyze/INSP-000001
 #### 5) 대화형 API 문서 (Swagger UI)
 - 브라우저에서 `http://localhost:8000/docs` 접속
 
-### 8.4 테스트 실행 및 검증 결과
+### 8.4 과거 테스트 결과 및 검증 범위
 
-프로젝트 루트에서 `vision-insight` 환경을 활성화한 뒤 아래 PowerShell 명령으로 출력 경로와 HTTPX 전송을 격리합니다. 단독 `pytest` 명령만으로는 이 격리가 적용되지 않습니다.
+아래는 **2026-10-17 Day4 당시의 과거 실행 예시**이며 현재 제출본용 실행 명령이 아닙니다. 이후 추가된 DB·Capture·모델 경로를 모두 격리한다고 보장하지 않습니다. 현재 전체 테스트를 이 명령이나 단독 `pytest`로 실행하지 말고 후속 작업에서 임시 저장소·네트워크/모델/DB 차단 범위를 검토해 승인된 테스트만 실행하세요. 이번 제출 준비에서는 테스트를 실행하지 않았습니다.
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTHONIOENCODING='utf-8'; @'
@@ -323,45 +428,90 @@ with patch.object(httpx.HTTPTransport, 'handle_request', side_effect=AssertionEr
 ```
 
 > **테스트 결과 구분 안내:**
-> - **이번 최종 전체 회귀:** 2026-10-17, **1089 PASS / 0 FAIL / 4 SKIP / XFAIL·XPASS 0 / 경고 2건**, 28.08초. 최신 입력 타입 보강 이후 전체를 1회 재검증했습니다.
-> - **이번 관련 실행:** Agent 988 PASS, READY/timeout/격리·보안 213 PASS. 그룹은 중복되므로 합산하지 않습니다.
+> - **Day4 당시 최종 전체 회귀:** 2026-10-17, **1089 PASS / 0 FAIL / 4 SKIP / XFAIL·XPASS 0 / 경고 2건**, 28.08초. 해당 회차의 입력 타입 보강 이후 전체를 재검증한 기록입니다.
+> - **Day4 당시 관련 실행:** Agent 988 PASS, READY/timeout/격리·보안 213 PASS. 그룹은 중복되므로 합산하지 않습니다.
 > - **SKIP 4건:** 임시 환경에 T03 주입 이미지가 등록되지 않은 Day3.5 이미지 통합 검사입니다. 각각의 이름·미검증 범위·Day4 제외 판단은 [최종 보고서](docs/day4-step5-final-verification.md#4-최종-통합-테스트)를 참조하세요. SKIP을 PASS로 계산하지 않습니다.
-> - **과거 기록:** 이전 README의 전체 536 PASS 및 단순 보고서 개별 50 PASS는 당시 결과이며 최신 전체 결과가 아닙니다. 후속 전체 1089 PASS 기록과 이번 최종 실행도 구분합니다.
+> - **과거 기록:** 이전 README의 536 PASS 및 개별 50 PASS는 별도 회차입니다. 1089 PASS도 현재 제출본의 새 실행 결과가 아니며 후속 기록은 개선 이력을 참조하세요.
 > - **주의:** 오프라인 테스트의 PASS는 Mock 대역 및 로컬 SDK 직렬화 성공이며, 실제 Gemini 서버에서의 최종 진단 품질 성공을 의미하지 않습니다.
+> - **2026-10-23 제출 준비:** 문서·리소스·링크·정적 참조만 점검합니다. 설치·빌드·기동·운영 회귀는 미실시입니다. 캐시 자동 정리 초안 역시 기존 이력상 검증 미실시이며 완료로 승격하지 않습니다.
+
+### 8.5 제출 리소스 분류 및 보호
+
+다음은 현재 코드 참조 기준의 제출 계약이며 **삭제·이동 지시가 아닙니다.** 실제 제출 ZIP은 아직 확보하지 못했으므로 포함 여부는 NOT_VERIFIED입니다.
+
+| 분류 | 경로·자료 | 포함 이유·조건 |
+|---|---|---|
+| REQUIRED | `backend/` 전체 | main·Agent·DB·Grab·RIG·Shadow import. Shadow가 OFF여도 해당 모듈은 필요 |
+| REQUIRED | `frontend/src/`, `frontend/public/`, `frontend/index.html`, `frontend/package.json`, `frontend/package-lock.json`, `frontend/vite.config.ts`, `frontend/tsconfig*.json` | 설치·UI·타입 검사·빌드. `public/visioninsight.svg` 포함 |
+| REQUIRED | `requirements-prod.txt`, `requirements.txt`, `requirements-db.txt`, `README.md`, `.env.example` | 완전한 설치 안내·의존성 참조·비밀값 없는 설정 형식 |
+| DEMO_REQUIRED | `models/patchcore/patchcore_bottle.ckpt`, `models/patchcore/model_metadata.json` | 실제 PatchCore 시연. Metadata 해시·34.1442 기준 유지 |
+| DEMO_REQUIRED | `data/outputs/videos/bottle_conveyor_clean_h264_1920x480_8s.mp4` (VID-000001) | 영상 목록은 등록 세 파일을 모두 조회하므로 VID-000003만 시연해도 세 파일을 보존 |
+| DEMO_REQUIRED | `data/outputs/videos/bottle_conveyor_bright_no_lines_h264_1920x480_8s.mp4` (VID-000002) | 기존 등록 보존 |
+| DEMO_REQUIRED | `data/outputs/videos/bottle_conveyor_mixed_ok_ng_16s_h264_1920x480.mp4` (VID-000003) | 제출 시연용 16초 혼합 영상. 판정 결과를 사전 보장하지 않음 |
+| DEMO_REQUIRED (정적 검사 시연) | `dataset/bottle/`의 허용 입력 PNG, 필요 시 `test_data/injected_images/` | Dataset 구조·집합 변경 시 정렬 기반 `IMG-BOTTLE-*` 매핑이 달라질 수 있음. 라이선스·공유 범위 확인, 평가 마스크·비공개 평가 자료 제외 |
+| OPTIONAL (ROI 관리 시연에는 필요) | `compose.roi-db.yaml`, `alembic.ini`, `migrations/`, `scripts/setup_roi_database.py` | 새 DB 설정·버전·승인 관리 재현. 기존 DB 볼륨·인증정보는 제출하지 않음 |
+| OPTIONAL (과거 결과 시연에는 연결 자료 필요) | `data/inspections.jsonl`, `data/inspection_logs.jsonl`, `data/outputs/grab_inspection_inputs/` 및 아래 저장 디렉터리 | 승인된 기록만 공유하며 Crop·Manifest·검사·RIG·Sidecar 연결 보존. 이름·ID 변경·원본 기록 정리·인증 우회 금지 |
+| OPTIONAL | `tests/`, `scripts/`, `frontend/scripts/`, `frontend/playwright/`, 관련 테스트 설정, `docs/`, `AGENTS.md`, `Dockerfile`, `.dockerignore`, 발표 자료 | 기본 실행과 별도의 재현·설계 자료로 권장 보존. npm의 E2E 스크립트를 쓸 때 해당 하네스·설정은 필요. 인증 문자열·개인 경로·공유 범위를 검토 |
+| EXCLUDE | `.env`, `.env.roi-db.local`, 실사용 키·DB 비밀번호·관리 토큰·서비스 계정 파일 | 새 로컬 설정을 생성. `.env.example`만 형식 예시로 제공 |
+| EXCLUDE | `.git/`, `frontend/node_modules/`, 일반 제출용 `frontend/dist/`, Python·Vite·브라우저 캐시, Chrome 프로필·Cookies·History·세션, 임시 Capture·미정제 로그·개인정보 자료 | 비밀·대용량 누적 방지. 필요한 테스트 증거를 캐시로 오인해 원본에서 삭제하지 않음 |
+| EXCLUDE | 평가 전용 비공개 자료·정답 마스크·평가 답안 | 제출·운영 입력과 분리하며 조사·복사·자동 포함 금지 |
+
+과거 결과 관련 저장 위치는 기본 `OUTPUT_DIR=data/outputs` 하위의 `grab_inspection_inputs/`, `inspection_anomaly_maps/`, `reinspection_history/`, `quality_shadow_metrics/`, `vision_reviews/`, `agent_reports/`입니다. 사용자/제품 정보·소유권 메타데이터를 검토하고 공유 대상을 별도 승인해야 합니다. 이미 보존된 데이터를 이 문서를 이유로 수정하지 않습니다.
+
+Checkpoint·영상·Dataset·검사 산출물은 대체로 Git ignored입니다. **Git 추적 파일만 압축하면 전체 시연본이 아닐 수 있습니다.** 반대로 일반 폴더 ZIP은 `.gitignore`를 자동 적용하지 않아 비밀 설정·브라우저 프로필이 포함될 수 있습니다. 소스·테스트의 고정 인증 문자열도 테스트 전용인지 검토하고 실사용 비밀 포함 시 제출을 중단합니다. 이번에는 압축·제외 대상 삭제·비밀번호 변경을 하지 않았습니다.
+
+### 8.6 후속 독립 실행 검증 계획 (미실시)
+
+1. 실제 ZIP 경로를 확보하고 내부 목록의 필수 소스·잠금 파일·모델·영상·비밀 설정 제외 여부를 대조합니다. 무조건 전체 개발 폴더를 복사하지 않습니다.
+2. 승인된 별도 경로·검증 PC/VM에 압축 해제하고 기존 Conda·DB·Capture·출력 경로를 공유하지 않습니다. 8.1의 Python 설치, 8.2의 `npm ci`, `npm run build`, `python -m pip check`를 검증합니다. 현재 성공 여부는 NOT_VERIFIED입니다.
+3. 모델 로드 미승인 시 검증 세션에 `ENABLE_PATCHCORE=false`를 지정해 기본 API부터 확인합니다. 이 결과를 모델 추론 PASS로 취급하지 않습니다. 실제 모델 적재·실추론은 별도 승인 범위입니다.
+4. 같은 PC라면 Backend 8001·Frontend 5174 등으로 포트를 분리하고 Frontend에 `VITE_API_BASE_URL=http://127.0.0.1:8001`, Backend에 `CORS_ALLOWED_ORIGINS=http://127.0.0.1:5174`를 지정합니다. `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001 --workers 1`, 별도 Frontend CMD에서 `npm run dev -- --host 127.0.0.1 --port 5174` 후 **`http://127.0.0.1:5174`**로 접속합니다. 기본 `/api` 프록시는 8000 고정이므로 API 주소 지정을 생략하지 않습니다.
+5. `CAPTURE_DIR`는 비어 있는 검증 전용 경로로 지정하고 `QUALITY_SHADOW_ENABLED=false`, `JUDGE_ASSISTED_WORKFLOW_ENABLED=true`, `VISION_REVIEW_LIVE_ENABLED=false`로 시작합니다. 페이지 진입의 새 격리 세션 발급과 기존 운영 세션을 구분합니다. 레거시 정책 회귀에서만 명시적으로 `JUDGE_ASSISTED_WORKFLOW_ENABLED=false`를 지정합니다. ROI 검증용 DB·이름·볼륨·Origin은 별도 승인 후 준비합니다.
+6. `/health`, 영상 목록·재생, 허용된 이미지·Heatmap·기록 조회를 확인합니다. 기존 Grab 소유권 오류를 우회하지 않습니다. 새 Grab·검사·실추론·Gemini LIVE는 별도 승인 전 실행하지 않습니다. 기존 읽기 전용 E2E 러너도 포트 8000/5173을 사용하므로 변경 승인 없이 격리 서버 검증에 실행하지 않습니다.
+7. 실패는 설치·import·모델/파일 경로·DB·Origin/세션·외부 API로 분류합니다. 버전·오류는 검증 전용 로그에만 저장하고 비밀값을 가립니다. 현재 실행 서버의 작업 디렉터리·유효 설정은 디스크 코드만으로 확정하지 않습니다.
 
 ---
 
+### 8.7 2026-10-23 Judge 설정 복구 및 신규 검사 정책 검증
+
+- HTTP Judge 설정을 서버 Settings로 통일하고 신규 그룹의 `judge-assisted-v1` 기본값과 UI를 연결했습니다. 과거 RIG·Judge 저장 결과는 변환하지 않습니다.
+- 운영 데이터·네트워크·실제 모델 적재/추론을 차단한 `scripts.safe_regression_backend.run_tests()`에서 관련 10개 모듈 **313 PASS / 0 FAIL / 7 SKIP**을 확인했습니다. SKIP은 실제 Checkpoint 경로 6건과 빈 격리 저장소의 기존 이력 조회 1건입니다.
+- Node의 `--test --test-reporter=tap`으로 서버에 접근하지 않는 프론트엔드 19개 스크립트 **145 PASS / 0 FAIL / 0 SKIP**을 확인했습니다. TypeScript·Vite `npm run build`는 외부 사본에서 통과했으며 개발 `node_modules`와 `dist`는 변경하지 않았습니다. 이번에 `npm ci`나 새 패키지 설치를 한 것은 아닙니다.
+- 증거: `C:/Users/USER/VisionInsight_Regression/judge-workflow-20261023_171306_9532cb13/`의 `backend-regression/backend.xml`, `safety.json`, `frontend-final.tap`, `frontend-build-final.log`. 임시 검증 증거 경로이며 실행에 필요한 프로젝트 경로가 아닙니다.
+- 실제 Chrome E2E·Gemini LIVE·운영 서버 재시작·신규 Grab·실제 PatchCore 추론·DB 연결은 실행하지 않았습니다. **코드 구현·격리 검증과 운영 반영을 구분**하며 기존 A-3-2 PARTIAL 상태는 변경하지 않습니다.
+
 ## 9. Cloud Run 배포 준비 현황 (Day 7 로드맵)
 
-- **운영용 CPU 최적화:** [requirements-prod.txt](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/requirements-prod.txt)에 PyTorch 공식 CPU 휠(`torch==2.6.0+cpu`, `torchvision==0.21.0+cpu`)을 지정하여 수 GB의 CUDA 오버헤드를 배제했습니다.
-- **컨테이너 빌드 명세:** [Dockerfile](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/Dockerfile)은 `python:3.11-slim` 기반으로 단일 워커 Uvicorn을 바인딩하며, `PORT` 환경변수에 동적으로 대응합니다.
-- **이미지 내 모델 번들링:** 체크포인트 크기가 24.18MB로 매우 작으므로 컨테이너 빌드 시 포함하여 Cold Start를 최소화했습니다.
+- **CPU 의존성 선언:** [requirements-prod.txt](requirements-prod.txt)에 `torch==2.6.0+cpu`, `torchvision==0.21.0+cpu`를 지정했습니다. 새 머신의 설치·메모리 측정과는 구분합니다.
+- **컨테이너 명세:** [Dockerfile](Dockerfile)은 Python 3.11·단일 워커·`PORT` 바인딩을 정의합니다. 이번에 Docker build·배포를 실행하지 않았습니다.
+- **모델 COPY 계약:** 약 24.18MiB Checkpoint와 Metadata를 COPY합니다. 실제 빌드·Cold Start 개선을 이번에 검증한 것은 아닙니다.
+- **전체 시연본과 차이:** 현재 Dockerfile은 Frontend·영상·Dataset·DB 마이그레이션을 COPY하지 않습니다. 컨테이너만으로 전체 시연 구성이 완성되지 않으며 실제 Cloud Run 배포·GCS 저장 전환은 미완료입니다.
 - **검사 이미지 공급 방안 (Day 7 배포 전 결정 필요):**
   - 방안 A (데모 이미지 번들링): 중립 데모 이미지 5~10장을 컨테이너에 동봉 (MVP 추천)
   - 방안 B (Cloud Storage 연동): GCS 버킷에서 이미지를 스트리밍 다운로드
-- **상세 배포 가이드:** [docs/cloud-run-deployment-guide.md](file:///c:/Users/USER/AI-NativeAgent/Project/InspectAgent/docs/cloud-run-deployment-guide.md) 참조.
+- **상세 배포 가이드:** [docs/cloud-run-deployment-guide.md](docs/cloud-run-deployment-guide.md) 참조.
 
 ---
 
 ## 10. 다음 단계 안내 및 인수인계 계획
 
-### 10.1 Day 4 완료 후 후속 작업 (각각 별도 승인)
+### 10.1 Day4 당시 후속 계획과 현재 상태의 구분
 1. **Day 5 반례·추가 조사:** 정상/NG·품질 경고의 경계 및 비표준 조사 흐름 효율을 평가합니다.
 2. **선택적 이미지 통합 테스트 보완:** 외부 임시 환경에서 T03 fixture를 준비해 남은 SKIP 4건을 검증합니다.
 3. **관측성 개선 검토:** 원본 응답의 안전한 보관과 기존 timeout 요약 필드의 오래된 표시를 별도 개선합니다.
-4. **웹 및 배포 검증:** 실제 UI 연동·로컬 브라우저 E2E 후 저장 계층·인증·비밀값·배포 설정을 점검합니다. 이번 Day4 완료 작업에서 수행한 내용이 아닙니다.
+4. **웹 및 배포 검증:** 이후 웹 UI는 구현되었지만 현재 제출 ZIP의 독립 실행·저장 계층·배포는 별도 검증 대상입니다. Day4나 과거 Chrome E2E 기록을 새 제출본의 설치 성공 증거로 사용하지 않습니다.
 
 과거 HTTP 400/504 이력은 상세 검증 문서에 보존합니다. 504의 서버 내부 원인과 실제 청구 비용은 UNKNOWN이며, 단일 성공만으로 반복 안정성을 주장하지 않습니다. 로컬 JSONL은 개발용이며 Cloud Run 영구 저장을 대신하지 않습니다.
 
-### 10.2 신규 영상 검사 요구사항 (향후 개발 로드맵)
-Day 4 완료 후 VisionInsight는 정적 단일 이미지 검사에서 **동영상 기반 실시간 검사 관제 시스템**으로 확장될 예정입니다:
-- **컨베이어 Live View 동영상 연동:** MVTec Bottle 이미지들로 합성한 컨베이어 벨트 주행 동영상을 `data/outputs/videos`에서 로드하여 웹 화면에 스트리밍.
-- **실시간 프레임 Grab:** 동영상 재생 중 특정 시점의 프레임을 캡처(Grab)하여 정지 이미지 생성.
-- **마우스 드래그 ROI(Region of Interest) 선택:** 웹 UI에서 마우스 드래그로 검사할 병 영역(ROI)을 지정.
-- **ROI 이미지 대상 기존 PatchCore 추론 적용:** 드래그로 추출된 관심 영역 이미지에 대해 기존 훈련된 ResNet-18 PatchCore 엔진 및 임계값(34.1442)을 동일하게 적용하여 실시간 결함 판정.
-- **품질 경고 및 검사 실패 시 Gemini Agent 자율 재진단:** 조명 이상(`WARNING_LOW_BRIGHTNESS`) 또는 검사 실패(`ERROR`) 발생 시 Gemini Agent가 자동으로 호출되어 원인 및 점검 가이드 제시.
-- **실행 로그 데이터 정제:** 검사 라이프사이클 이벤트 로그에서 불필요하거나 가상인 `product_id`를 제외하고 정제된 감사 로그 유지.
-- **React 관제 화면 구현:** Live View 플레이어와 Grab Image View, ROI 선택 도구, Agent 진단 패널을 통합한 React 대시보드 구축 (Day 6).
+### 10.2 현재 영상 검사 기능과 미완료 범위
+
+현재 PoC는 **녹화·합성 영상 기반 MANUAL 검사 관제**입니다. LiveView·Grab·ROI·PatchCore·React 대시보드는 구현되어 있지만 실제 카메라의 실시간 연속 검사와 같지 않습니다.
+
+- **구현:** 등록 영상 선택·스트리밍·Pause/Seek/프레임 이동, ROI Grab 검사, Heatmap·원본 픽셀 뷰어, Edge/GV 비교, 검사·Gemini 저장 결과 조회.
+- **명시 실행:** Vision Judge는 독립 참고 의견이고 Diagnostic Agent는 도구 기반 사후 설명입니다. 품질 경고가 발생했다고 Gemini가 자동 호출되거나 서버 판정이 교체되지 않습니다.
+- **유지:** Checkpoint·34.1442·GV 125~150·기존 판정 정책 및 Crop·Manifest·JSONL·RIG·Heatmap·Sidecar·파일명·ID 매핑을 보존합니다. 제출 준비를 이유로 로그를 정제·덮어쓰지 않습니다.
+- **미완료:** AUTO 연속 검사, 실제 PLC/카메라 제어, Cloud Run/GCS 운영 전환, 신규 3단계 정책의 실제 서버 반영·브라우저 E2E·Gemini LIVE 재검증, A-3-2의 남은 수락 검증.
+- **제출 우선순위:** 신규 기능을 중단하고 ZIP의 비밀 파일 제외·필수 리소스·독립 설치/기동을 검증합니다. 운영 전처리·모델·실추론·외부 호출 변경은 별도 승인 대상입니다.
 
 > **주의:** 기존 훈련된 PatchCore 체크포인트(`models/patchcore/patchcore_bottle.ckpt`)와 결정 임계값(`34.1442`)은 그대로 유지됩니다.  
 > 실제 Gemini API 호출 및 유료 모델 요청은 사용자의 사전 확인 및 명시적 승인 하에서만 1회씩 진행됩니다.

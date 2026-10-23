@@ -149,7 +149,7 @@ test('only the two non-authoritative workflow hints are cleared; server data are
 
 test('blocking and restoring states never say first inspection ready', () => {
   const state = {group:null,restoring:false,blocked:false,hasCrop:true,ready:true};
-  assert.equal(inspectionProgress(state),'최초 검사 1 / 3 준비');
+  assert.equal(inspectionProgress(state),'1차 PatchCore 검사 준비 · 신규 정책은 서버에서 확정');
   assert.match(inspectionProgress({...state,blocked:true}),/검사 차단/);
   assert.doesNotMatch(inspectionProgress({...state,restoring:true}),/최초 검사.*준비/);
 });

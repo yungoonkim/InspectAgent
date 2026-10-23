@@ -65,3 +65,12 @@ test('manual confirmation is a separate server group record, not the Judge verdi
   assert.ok(manualReviewLabel({ ...group, attempts: [] }, inspection).includes('미조회'));
   assert.ok(manualReviewLabel({ ...group, manual_reviews: [] }, inspection).includes('미실시'));
 });
+
+test('one judge-assisted REINSPECT exposes manual confirmation without waiting for Gemini', () => {
+  const group = { workflow_policy: 'judge-assisted-v1', group_id: 'RIG-MOCK', status: 'MANUAL_REVIEW_REQUIRED',
+    attempts: [{ inspection_id: inspection.inspection_id }], manual_reviews: [] };
+  const label = manualReviewLabel(group, inspection);
+  assert.match(label, /3차 작업자 확인 가능/);
+  assert.doesNotMatch(label, /3회 후/);
+  assert.equal(inspection.final_result, 'REINSPECT');
+});

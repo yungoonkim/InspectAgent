@@ -14,13 +14,14 @@ export interface ReinspectionAttempt {
 }
 
 export interface ReinspectionGroup {
+  workflow_policy?: 'judge-assisted-v1';
   group_id: string;
   product_id: string;
   version: number;
-  status: 'RETRY_ALLOWED' | 'COMPLETED' | 'MANUAL_REVIEW_REQUIRED' | 'MANUAL_REVIEWED' | 'RECOVERY_REQUIRED';
+  status: 'RETRY_ALLOWED' | 'COMPLETED' | 'MANUAL_REVIEW_REQUIRED' | 'MANUAL_REVIEWED' | 'RECOVERY_REQUIRED' | 'INSPECTION_PENDING' | 'INSPECTION_FAILED';
   attempt_count: number;
-  remaining_attempts: number;
-  max_attempts: number;
+  remaining_attempts: number | null;
+  max_attempts: number | null;
   current_inspection_id: string | null;
   attempts: ReinspectionAttempt[];
   failed_attempts: ReinspectionAttempt[];

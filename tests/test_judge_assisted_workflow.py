@@ -50,8 +50,8 @@ def fake_judge(harness, record, monkeypatch, verdict="REINSPECT", error=None):
     return SimpleNamespace(client=client, service=service, endpoint=endpoint)
 
 
-def test_default_off_and_client_cannot_select_policy(harness):
-    assert Settings.model_fields["JUDGE_ASSISTED_WORKFLOW_ENABLED"].default is False
+def test_new_default_and_explicit_legacy_fixture_cannot_be_overridden_by_client(harness):
+    assert Settings.model_fields["JUDGE_ASSISTED_WORKFLOW_ENABLED"].default is True
     assert harness.client.app.state.video_runtime.settings.JUDGE_ASSISTED_WORKFLOW_ENABLED is False
     response = inspect(harness, {**harness.payload, "workflow_policy": JUDGE_ASSISTED_POLICY})
     assert response.status_code == 422
@@ -69,7 +69,19 @@ def test_setting_can_be_loaded_without_changing_environment_files(monkeypatch, v
     assert Settings(_env_file=None).JUDGE_ASSISTED_WORKFLOW_ENABLED is expected
 
 
-def test_fallback_setting_is_off_and_explicitly_opt_in(monkeypatch):
+def test_new_group_uses_default_policy_without_an_opt_in_flag(harness, monkeypatch):
+    monkeypatch.delenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", raising=False)
+    monkeypatch.setattr(harness.client.app.state.video_runtime.settings, "JUDGE_ASSISTED_WORKFLOW_ENABLED",
+                        Settings(_env_file=None).JUDGE_ASSISTED_WORKFLOW_ENABLED)
+    record = first_warning(harness)
+    group = group_for(harness, record)
+    assert group["workflow_policy"] == JUDGE_ASSISTED_POLICY
+    assert group["max_attempts"] is None and group["remaining_attempts"] is None
+    assert group["attempt_count"] == 1 and group["status"] == "MANUAL_REVIEW_REQUIRED"
+    assert review(harness, group, "HOLD").status_code == 200
+
+
+def test_fallback_defaults_to_new_policy_and_allows_explicit_legacy_setting(monkeypatch):
     import builtins
     original_import = builtins.__import__
     def without_settings(name, *args, **kwargs):
@@ -82,9 +94,9 @@ def test_fallback_setting_is_off_and_explicitly_opt_in(monkeypatch):
         Path(__file__).resolve().parents[1] / "backend/config.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
-    assert module.Settings().JUDGE_ASSISTED_WORKFLOW_ENABLED is False
-    monkeypatch.setenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", "true")
     assert module.Settings().JUDGE_ASSISTED_WORKFLOW_ENABLED is True
+    monkeypatch.setenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", "false")
+    assert module.Settings().JUDGE_ASSISTED_WORKFLOW_ENABLED is False
 
 
 @pytest.mark.parametrize("score,expected", [(20.0, "OK"), (45.0, "NG")])

@@ -31,8 +31,8 @@ def build_router(storage_getter):
         raw = get_grab_runtime(request, runtime.settings).authorize_record(record, owner)
         with _runtime_lock:
             if not hasattr(request.app.state, "vision_review_service"):
-                request.app.state.vision_review_service = VisionReviewService.from_environment(
-                    Path(runtime.settings.absolute_output_path) / "vision_reviews", runtime.settings.GEMINI_API_KEY)
+                request.app.state.vision_review_service = VisionReviewService.from_settings(
+                    Path(runtime.settings.absolute_output_path) / "vision_reviews", runtime.settings)
             service = request.app.state.vision_review_service
         return service, owner, validate_crop(record, raw, service.policy), raw
 

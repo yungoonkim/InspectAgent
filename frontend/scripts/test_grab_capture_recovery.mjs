@@ -31,7 +31,7 @@ function panel(savedGroup=null){
   const hooks=[];let cursor=0;let effects=[];
   const hints=new Map([[recovery.PENDING_CAPTURE_HINT_KEY,'CAP-OLD'],['unrelated','KEEP']]);
   if(savedGroup)hints.set(recovery.GROUP_HINT_KEY,savedGroup.group_id);
-  const requests=[];const controls={confirm:true,captureFailure:null};
+  const requests=[];const controls={confirm:true,captureFailure:null,allowManual:false,manualRequests:[]};
   const effect=(callback,dependencies)=>{
     const index=cursor++;const previous=hooks[index];
     if(!previous||dependencies.some((value,offset)=>value!==previous.dependencies[offset])){
@@ -46,7 +46,13 @@ function panel(savedGroup=null){
   const dependencies={react:fakeReact,'react/jsx-runtime':require('react/jsx-runtime'),
     '../utils/reinspectionRecovery':recovery,'../utils/reinspectionState':workflow,
     '../utils/grabInspectionState':grab,'../utils/inspectionQualitySummary':quality,
-    '../api/inspection':{createGrabInspection:forbidden,getInspection:forbidden,saveManualReview:forbidden,
+    '../api/inspection':{createGrabInspection:forbidden,getInspection:forbidden,
+      saveManualReview:async (group,result,operator,reason)=>{
+        if(!controls.allowManual)return forbidden();
+        controls.manualRequests.push({result,operator,reason,inspectionId:group.current_inspection_id});
+        return {...group,version:group.version+1,status:result==='HOLD'?'MANUAL_REVIEW_REQUIRED':'MANUAL_REVIEWED',
+          manual_reviews:[...group.manual_reviews,{review_id:'REV-SYNTHETIC',result,operator_id:operator,reason,timestamp:'SYNTHETIC_TIME'}]};
+      },
       getCaptureReinspectionGroup:async identifier=>{requests.push(['CAPTURE_GROUP',identifier]);
         if(identifier==='CAP-OLD')throw {status:404,data:{detail:{error_code:'CAPTURE_NOT_FOUND'}}};throw missing;},
       getReinspectionGroup:async identifier=>{requests.push(['GROUP',identifier]);if(savedGroup)return savedGroup;throw missing;},
@@ -107,3 +113,27 @@ test('a restored terminal RIG is not replaced by an unused new Capture',async()=
   assert.equal(view.hints.get(recovery.GROUP_HINT_KEY),group.group_id);
   assert.deepEqual(group,before);
 });
+
+for(const result of ['HOLD','MANUAL_OK','MANUAL_NG']){
+  test(`judge-assisted first REINSPECT supports explicit ${result} without any Judge call`,async()=>{
+    const group={workflow_policy:'judge-assisted-v1',group_id:'RIG-ASSISTED',product_id:'PRODUCT',version:1,
+      current_inspection_id:'INSP-SYNTHETIC',attempt_count:1,remaining_attempts:null,max_attempts:null,
+      status:'MANUAL_REVIEW_REQUIRED',attempts:[{inspection_id:'INSP-SYNTHETIC',attempt_number:1,
+        result:'OK',final_result:'REINSPECT',input_provenance:{capture_id:'CAP-FIRST'}}],failed_attempts:[],manual_reviews:[]};
+    const original=structuredClone(group);const view=panel(group);
+    view.hints.delete(recovery.PENDING_CAPTURE_HINT_KEY);view.controls.allowManual=true;
+    view.render();await view.settle();
+    assert.match(text(view.render()),/3차 작업자 최종 확인/);
+    assert.doesNotMatch(text(view.render()),/한도 도달|검사 1 \/ 3|남은 null/);
+    assert.equal(view.button('수동 확인 저장').props.disabled,true);
+    const field=label=>nodes(view.render()).find(node=>node.props?.['aria-label']===label);
+    field('작업자 표시명').props.onChange({target:{value:'SYNTHETIC_OPERATOR'}});
+    field('수동 판단 사유').props.onChange({target:{value:'SYNTHETIC_REASON'}});
+    field('수동 결과').props.onChange({target:{value:result}});
+    assert.equal(view.button('수동 확인 저장').props.disabled,false);
+    view.button('수동 확인 저장').props.onClick();await view.settle();
+    assert.deepEqual(view.controls.manualRequests,[{result,operator:'SYNTHETIC_OPERATOR',reason:'SYNTHETIC_REASON',inspectionId:'INSP-SYNTHETIC'}]);
+    assert.match(text(view.render()),new RegExp(result));
+    assert.deepEqual(group,original);
+  });
+}

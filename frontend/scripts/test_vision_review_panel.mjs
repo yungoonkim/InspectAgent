@@ -113,6 +113,32 @@ function panel(initial = inspection(), read = async () => response(initial), cre
   return { render, consent, button, historyButton, settle, requests, inspectionReads, props };
 }
 
+for (const mode of ['DISABLED', 'ANALYSIS_FAILED']) {
+  test(`judge-assisted manual navigation remains available with ${mode} without a Judge POST`, async () => {
+    const input = inspection();
+    const before = structuredClone(input);
+    const stored = response(input, mode === 'ANALYSIS_FAILED' ? mode : null);
+    if (mode === 'DISABLED') stored.capabilities = { ...stored.capabilities, enabled: false, live_enabled: false };
+    const view = panel(input, async () => stored);
+    let manualNavigations = 0;
+    view.props.reinspectionGroup = { workflow_policy: 'judge-assisted-v1', group_id: input.metrics.reinspection.group_id,
+      status: 'MANUAL_REVIEW_REQUIRED', attempts: [{ inspection_id: input.inspection_id,
+        input_provenance: input.metrics.input_provenance }], manual_reviews: [] };
+    view.props.onRequestManualReview = () => { manualNavigations++; };
+    view.render(); await view.settle();
+    assert.equal(view.button().props.disabled, true);
+    assert.equal(view.consent(), undefined);
+    const manual = nodes(view.render()).find(node => node.type === 'button' && text(node) === '3차 작업자 확인으로 이동');
+    assert.ok(manual);
+    manual.props.onClick();
+    assert.equal(manualNavigations, 1);
+    assert.deepEqual(view.requests.post, []);
+    assert.deepEqual(input, before);
+    view.props.reinspectionGroup = { ...view.props.reinspectionGroup, group_id: 'RIG-OTHER' };
+    assert.equal(nodes(view.render()).some(node => node.type === 'button' && text(node) === '3차 작업자 확인으로 이동'), false);
+  });
+}
+
 test('eligible Judge preserves consent on rerender without a repeated GET or automatic POST', async () => {
   const view = panel();
   view.render();

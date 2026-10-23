@@ -44,5 +44,8 @@ export function manualReviewLabel(group: ReinspectionGroup | null, inspection: I
     return '미조회 · 기존 재검사 패널에서 서버 이력을 확인하세요';
   }
   const latest = group.manual_reviews.at(-1);
-  return latest ? `${latest.result} · 개발용 수동 확인 · ${latest.timestamp}` : `미실시 · ${group.status} · 기존 3회 후 확인 정책 유지`;
+  return latest ? `${latest.result} · 개발용 수동 확인 · ${latest.timestamp}`
+    : group.workflow_policy === 'judge-assisted-v1'
+      ? `미실시 · ${group.status} · 3차 작업자 확인 가능 · Gemini 실행은 필수 아님`
+      : `미실시 · ${group.status} · 레거시 3회 후 확인 정책 유지`;
 }

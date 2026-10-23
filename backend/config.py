@@ -43,7 +43,7 @@ try:
         VISION_REVIEW_MODEL: str = Field(default="gemini-3.8-flash")
         VISION_REVIEW_TIMEOUT_SECONDS: float = Field(default=30, gt=0)
         QUALITY_SHADOW_ENABLED: bool = Field(default=False)
-        JUDGE_ASSISTED_WORKFLOW_ENABLED: bool = Field(default=False)
+        JUDGE_ASSISTED_WORKFLOW_ENABLED: bool = Field(default=True)
 
         AGENT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=1, le=10)
         AGENT_MAX_TOOL_CALLS: int = Field(default=8, ge=1, le=30)
@@ -198,7 +198,7 @@ except ImportError:
             if self.VISION_REVIEW_TIMEOUT_SECONDS <= 0:
                 raise ValueError("INVALID_VISION_REVIEW_TIMEOUT")
             self.QUALITY_SHADOW_ENABLED = os.getenv("QUALITY_SHADOW_ENABLED", "false").lower() in ("1", "true", "yes")
-            self.JUDGE_ASSISTED_WORKFLOW_ENABLED = os.getenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", "false").lower() in ("1", "true", "yes")
+            self.JUDGE_ASSISTED_WORKFLOW_ENABLED = os.getenv("JUDGE_ASSISTED_WORKFLOW_ENABLED", "true").lower() in ("1", "true", "yes")
             self.AGENT_MAX_TOOL_ROUNDS = int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "4"))
             self.AGENT_MAX_TOOL_CALLS = int(os.getenv("AGENT_MAX_TOOL_CALLS", "8"))
             self.AGENT_MAX_REPEAT_CALLS = int(os.getenv("AGENT_MAX_REPEAT_CALLS", "2"))

@@ -22,8 +22,16 @@ function nodes(element) {
 function tabs() {
   const hooks = [];
   let cursor = 0;
+  let effects = [];
   const focused = [];
   const fakeReact = { ...React,
+    useEffect: (callback, dependencies) => {
+      const index = cursor++;
+      if (!hooks[index] || dependencies.some((value, offset) => value !== hooks[index].dependencies[offset])) {
+        hooks[index] = { dependencies };
+        effects.push(callback);
+      }
+    },
     useState: initial => {
       const index = cursor++;
       if (!(index in hooks)) hooks[index] = initial;
@@ -51,7 +59,9 @@ function tabs() {
   };
   const render = () => {
     cursor = 0;
+    effects = [];
     const tree = exports.InspectionTabs(props);
+    for (const callback of effects) callback();
     for (const button of nodes(tree).filter(node => node.props?.role === 'tab')) {
       button.props.ref.current = { focus: () => focused.push(button.props.id) };
     }
@@ -73,6 +83,22 @@ test('Grab is the default tab and both panels are mounted with accessible relati
     assert.equal(button.props['aria-controls'], panel.props.id);
     assert.equal(panel.props['aria-labelledby'], button.props.id);
   }
+});
+
+test('explicit workflow navigation selects Judge or manual stage without any API action', () => {
+  const view = tabs();
+  const originalJudge = view.props.judgePanel;
+  for (const stage of ['judge', 'patchcore', 'judge']) {
+    view.props.requestedGrabStage = { stage };
+    view.render();
+    assert.equal(view.panels()[0].props.hidden, false);
+    assert.equal(view.stagePanels()[stage === 'judge' ? 1 : 0].props.hidden, false);
+    assert.equal(view.props.judgePanel, originalJudge);
+  }
+  view.stageButtons()[0].props.onClick();
+  view.props.requestedGrabStage = { stage: 'judge' };
+  view.render();
+  assert.equal(view.stagePanels()[1].props.hidden, false);
 });
 
 test('switching tabs only hides panels without replacing their mounted subtree or draft inputs', () => {

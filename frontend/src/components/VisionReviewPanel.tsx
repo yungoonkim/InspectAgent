@@ -6,8 +6,9 @@ import { createVisionReview, getVisionReview } from '../api/visionReview';
 import { getInspection } from '../api/inspection';
 import { canRequestVisionReview, judgeOutcome, manualReviewLabel, matchesVisionInput, visionInputKey } from '../utils/visionReviewState';
 
-export function VisionReviewPanel({ inspection, reinspectionGroup = null }: {
+export function VisionReviewPanel({ inspection, reinspectionGroup = null, onRequestManualReview }: {
   inspection: InspectionResponse | null; reinspectionGroup?: ReinspectionGroup | null;
+  onRequestManualReview?: () => void;
 }) {
   const key = visionInputKey(inspection);
   const currentKey = useRef(key);
@@ -142,6 +143,11 @@ export function VisionReviewPanel({ inspection, reinspectionGroup = null }: {
       </label>}
       <button type="button" className="btn btn-primary" disabled={!!busyKey || !canRequestVisionReview(response, consentKey === key)}
         onClick={() => void requestReview()}>현재 Crop Gemini Judge 2차 판정</button>
+      {reinspectionGroup?.workflow_policy === 'judge-assisted-v1' && groupMatches
+        && reinspectionGroup.status === 'MANUAL_REVIEW_REQUIRED' && onRequestManualReview && <>
+        <p className="judge-note">Gemini는 선택적 참고 의견입니다. 미실행·비활성·분석 실패여도 원본 REINSPECT를 유지하며 작업자가 MANUAL_OK / MANUAL_NG / HOLD를 저장할 수 있습니다.</p>
+        <button type="button" className="btn" onClick={onRequestManualReview}>3차 작업자 확인으로 이동</button>
+      </>}
       {response?.capabilities.analysis_mode === 'FAKE_TEST' && <strong className="judge-note judge-warning">FAKE_TEST · MOCK TEST ONLY · 실제 Gemini 분석 아님</strong>}
       {busyKey === key && <div role="status" className="judge-status">보조 분석 요청 중 · 자동 재시도 없음</div>}
       {current?.error && <div role="alert" className="judge-note judge-error">{current.error}</div>}

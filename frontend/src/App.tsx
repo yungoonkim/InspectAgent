@@ -52,6 +52,7 @@ export const App: React.FC = () => {
   // Phase F-2: Static Image Inspection & Agent state
   const [currentInspection, setCurrentInspection] = useState<InspectionResponse | null>(null);
   const [reinspectionGroup, setReinspectionGroup] = useState<ReinspectionGroup | null>(null);
+  const [requestedGrabStage, setRequestedGrabStage] = useState<{ stage: 'patchcore' | 'judge' }>();
   const selectionVersionRef = useRef(0);
   const getSelectionVersion = useCallback(() => selectionVersionRef.current, []);
   const startSelection = useCallback(() => {
@@ -478,10 +479,13 @@ export const App: React.FC = () => {
 
             <div className="flex flex-col gap-4">
               <InspectionTabs
+                requestedGrabStage={requestedGrabStage}
                 grabPanel={<GrabInspectionPanel crop={cropData} enabled={mode === 'MANUAL' && roiState === 'APPLIED' && !isGrabbing} manualMode={mode === 'MANUAL'}
                   currentInspection={currentInspection}
+                  onRequestJudge={() => setRequestedGrabStage({ stage: 'judge' })}
                   onSelectionStart={startSelection} onInspectionChange={handleInspectionChange} onGroupChange={setReinspectionGroup} />}
-                judgePanel={<VisionReviewPanel inspection={currentInspection} reinspectionGroup={reinspectionGroup} />}
+                judgePanel={<VisionReviewPanel inspection={currentInspection} reinspectionGroup={reinspectionGroup}
+                  onRequestManualReview={() => setRequestedGrabStage({ stage: 'patchcore' })} />}
                 staticImagePanel={<InspectionPanel
                   currentInspection={currentInspection}
                   onInspectionChange={handleInspectionChange}
